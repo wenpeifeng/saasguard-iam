@@ -1,0 +1,75 @@
+/* 全局样式（Tailwind 基座 + 全站基础覆盖） */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------------- 现代化登录页动画 ---------------- */
+
+/* 品牌区网格背景缓慢漂移 */
+@keyframes grid-pan {
+  0% { background-position: 0 0; }
+  100% { background-position: 120px 80px; }
+}
+.login-grid {
+  animation: grid-pan 18s linear infinite;
+}
+
+/* 柔光斑漂浮 */
+@keyframes orb-float {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(28px, -34px) scale(1.12); }
+}
+.login-orb {
+  animation: orb-float 12s ease-in-out infinite;
+}
+
+/* 登录卡入场（上浮渐入） */
+@keyframes card-rise {
+  from { opacity: 0; transform: translateY(26px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.login-card-enter {
+  animation: card-rise 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* 内容页切换（路由变化时重放） */
+@keyframes page-fade {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.page-fade {
+  animation: page-fade 0.28s ease-out both;
+}
+
+/* 主题徽标呼吸光晕 */
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 18px rgba(47, 84, 235, 0.35); }
+  50% { box-shadow: 0 0 34px rgba(47, 84, 235, 0.6); }
+}
+.brand-glow {
+  animation: glow-pulse 3.6s ease-in-out infinite;
+}
+
+/* ---------------- 细滚动条（管理端内容区） ---------------- */
+.thin-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 3px;
+}
+.thin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}

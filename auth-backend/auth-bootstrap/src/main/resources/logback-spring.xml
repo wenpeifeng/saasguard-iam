@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ERP 后端日志配置（Spring Boot 扩展版 logback，支持 springProfile / springProperty）。
+
+  设计要点（详见 docs/日志规范.md）：
+  1. 日志级别只在本文件维护（application.yml 不再配置 logging.level，避免 yml 覆盖 profile 分级）；
+  2. 文件日志统一为 JSON 结构化（logstash-logback-encoder），字段：
+     timestamp / level / traceId / logger / thread / message / stackTrace
+     + MDC 上下文 tenantId / orgId / userId（由 TraceIdFilter + JwtAuthFilter 写入）；
+  3. 文件落 ${LOG_PATH:-logs}/ 目录（相对启动目录；start-all.sh 以仓库根为工作目录 → 仓库根/logs/），
+     按天 + 单文件 100MB 滚动、保留 30 天、压缩归档到 logs/archive/；
+  4. dev profile：控制台彩色可读（含 traceId / tenantId / userId），文件同 JSON；
+     其余 profile（prod/默认）：控制台与文件均为 JSON，业务 INFO、MyBatis SQL 调至 WARN；
+  5. 文件 appender 走 AsyncAppender（队列 2048、不丢弃 WARN 以下日志、never-block 关闭），
+     业务线程不被磁盘 I/O 阻塞，同时保证 MDC 在异步线程可用（logback 入队前快照 MDC）。
+-->
+<configuration scan="false">
+    <!-- Spring Boot 默认转换规则：%clr 彩色、%wEx 精简堆栈；以及 Tomcat/Hibernate 等第三方噪音级别 -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <springProperty scope="context" name="APP_NAME" source="spring.application.name" defaultValue="auth-backend"/>
+    <!-- LOG_PATH 由 application.yml 的 logging.file.path 注入；未配置时回退 logs（相对启动目录） -->
+    <property name="LOG_PATH" value="${LOG_PATH:-logs}"/>
+    <property name="LOG_FILE_BASE" value="${LOG_PATH}/${APP_NAME}"/>
+
+    <!-- 控制台可读格式：时间 级别 [traceId] [t:租户 u:用户] [线程] logger : 消息 -->
+    <property name="CONSOLE_PATTERN"
+              value="%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr(%5p) %clr([%X{traceId:-}]){cyan} %clr([t:%X{tenantId:-} u:%X{userId:-}]){magenta} %clr([%15.15t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n%wEx"/>
+
+    <!-- ============ dev：控制台彩色可读 ============ -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+            <pattern>${CONSOLE_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- ============ 生产/默认：控制台 JSON（容器 stdout 采集） ============ -->
+    <appender name="CONSOLE_JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <fieldNames>
+                <timestamp>timestamp</timestamp>
+                <version>[ignore]</version>
+                <message>message</message>
+                <logger>logger</logger>
+                <thread>thread</thread>
+                <level>level</level>
+                <levelValue>[ignore]</levelValue>
+                <stackTrace>stackTrace</stackTrace>
+            </fieldNames>
+            <timeZone>Asia/Shanghai</timeZone>
+            <timestampPattern>yyyy-MM-dd'T'HH:mm:ss.SSSXXX</timestampPattern>
+            <includeContext>false</includeContext>
+            <includeMdcKeyName>traceId</includeMdcKeyName>
+            <includeMdcKeyName>tenantId</includeMdcKeyName>
+            <includeMdcKeyName>orgId</includeMdcKeyName>
+            <includeMdcKeyName>userId</includeMdcKeyName>
+            <customFields>{"app":"${APP_NAME}"}</customFields>
+            <throwableConverter class="net.logstash.logback.stacktrace.ShortenedThrowableConverter">
+                <maxDepthPerThrowable>30</maxDepthPerThrowable>
+                <maxLength>8192</maxLength>
+                <rootCauseFirst>true</rootCauseFirst>
+                <exclude>^jdk\.internal\.reflect\..*</exclude>
+                <exclude>^java\.lang\.reflect\.Method\.invoke</exclude>
+                <exclude>^org\.springframework\.(aop|cglib)\..*</exclude>
+                <exclude>^org\.springframework\.security\.web\..*</exclude>
+                <exclude>^org\.springframework\.web\.filter\..*</exclude>
+                <exclude>^org\.apache\.(catalina|coyote|tomcat)\..*</exclude>
+            </throwableConverter>
+        </encoder>
+    </appender>
+
+    <!-- ============ 文件：JSON 结构化 + 按天/100MB 滚动 + 保留 30 天 ============ -->
+    <appender name="FILE_JSON" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_FILE_BASE}.json</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_PATH}/archive/${APP_NAME}.%d{yyyy-MM-dd}.%i.json.gz</fileNamePattern>
+            <maxFileSize>100MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>10GB</totalSizeCap>
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
+        </rollingPolicy>
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <fieldNames>
+                <timestamp>timestamp</timestamp>
+                <version>[ignore]</version>
+                <message>message</message>
+                <logger>logger</logger>
+                <thread>thread</thread>
+                <level>level</level>
+                <levelValue>[ignore]</levelValue>
+                <stackTrace>stackTrace</stackTrace>
+            </fieldNames>
+            <timeZone>Asia/Shanghai</timeZone>
+            <timestampPattern>yyyy-MM-dd'T'HH:mm:ss.SSSXXX</timestampPattern>
+            <includeContext>false</includeContext>
+            <includeMdcKeyName>traceId</includeMdcKeyName>
+            <includeMdcKeyName>tenantId</includeMdcKeyName>
+            <includeMdcKeyName>orgId</includeMdcKeyName>
+            <includeMdcKeyName>userId</includeMdcKeyName>
+            <customFields>{"app":"${APP_NAME}"}</customFields>
+            <throwableConverter class="net.logstash.logback.stacktrace.ShortenedThrowableConverter">
+                <maxDepthPerThrowable>30</maxDepthPerThrowable>
+                <maxLength>8192</maxLength>
+                <rootCauseFirst>true</rootCauseFirst>
+                <exclude>^jdk\.internal\.reflect\..*</exclude>
+                <exclude>^java\.lang\.reflect\.Method\.invoke</exclude>
+                <exclude>^org\.springframework\.(aop|cglib)\..*</exclude>
+                <exclude>^org\.springframework\.security\.web\..*</exclude>
+                <exclude>^org\.springframework\.web\.filter\..*</exclude>
+                <exclude>^org\.apache\.(catalina|coyote|tomcat)\..*</exclude>
+            </throwableConverter>
+        </encoder>
+    </appender>
+
+    <!-- 异步写文件：discardingThreshold=0 表示队列满也不丢弃任何级别；neverBlock=false 队列满时阻塞而非丢日志 -->
+    <appender name="ASYNC_FILE_JSON" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>2048</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>false</neverBlock>
+        <includeCallerData>false</includeCallerData>
+        <appender-ref ref="FILE_JSON"/>
+    </appender>
+
+    <!-- ============ 级别与输出（按 profile） ============ -->
+    <!-- dev：业务 DEBUG（MyBatis Slf4jImpl 打印 SQL 便于排查慢 SQL），控制台彩色 + 文件 JSON -->
+    <springProfile name="dev">
+        <logger name="com.auth" level="DEBUG"/>
+        <logger name="org.apache.ibatis" level="WARN"/>
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="ASYNC_FILE_JSON"/>
+        </root>
+    </springProfile>
+
+    <!-- 生产 / 未指定 profile：业务 INFO，MyBatis / MP 调至 WARN（SQL 不再逐条输出），控制台与文件均 JSON -->
+    <springProfile name="!dev">
+        <logger name="com.auth" level="INFO"/>
+        <logger name="org.apache.ibatis" level="WARN"/>
+        <logger name="com.baomidou" level="WARN"/>
+        <logger name="org.mybatis" level="WARN"/>
+        <root level="INFO">
+            <appender-ref ref="CONSOLE_JSON"/>
+            <appender-ref ref="ASYNC_FILE_JSON"/>
+        </root>
+    </springProfile>
+</configuration>

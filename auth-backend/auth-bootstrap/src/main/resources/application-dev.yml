@@ -1,0 +1,33 @@
+# ================= 开发环境（dev）配置 =================
+# 本地 Docker 容器：script/sh/env-init.sh 启动的 auth-mysql / auth-redis
+
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:13306/auth_db?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: auth123456
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 5000
+
+  data:
+    redis:
+      host: localhost
+      port: 16379
+      password: auth123456
+      database: 0
+      timeout: 3s
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 4
+          min-idle: 0
+
+# 开发期暴露全部 actuator 端点，便于排查
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"

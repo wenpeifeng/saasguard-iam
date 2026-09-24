@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <!-- auth-platform 分组壳：平台纵切模块（system=平台RBAC/审计，idm=主账号/组织/生命周期） -->
+    <parent>
+        <groupId>com.auth</groupId>
+        <artifactId>auth-backend</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>auth-platform</artifactId>
+    <packaging>pom</packaging>
+    <name>auth-platform</name>
+    <description>平台层分组：auth-platform-system + auth-platform-idm</description>
+    <modules>
+        <module>auth-platform-system</module>
+        <module>auth-platform-idm</module>
+    </modules>
+</project>

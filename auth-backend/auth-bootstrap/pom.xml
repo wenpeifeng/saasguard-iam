@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+      auth-bootstrap：启动聚合模块。
+      唯一打包为可执行 jar 的模块：依赖全部业务模块，携带全局配置与启动类。
+      规则：业务代码不许写在这里，本模块只有启动类、配置、健康检查。
+    -->
+    <parent>
+        <groupId>com.auth</groupId>
+        <artifactId>auth-backend</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>auth-bootstrap</artifactId>
+    <name>auth-bootstrap</name>
+    <description>启动聚合模块：Spring Boot 启动类 + 全局配置</description>
+
+    <dependencies>
+        <!-- 聚合全部业务模块 -->
+        <dependency>
+            <groupId>com.auth</groupId>
+            <artifactId>auth-platform-system</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.auth</groupId>
+            <artifactId>auth-platform-idm</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.auth</groupId>
+            <artifactId>auth-biz-app</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.auth</groupId>
+            <artifactId>auth-biz-oidc</artifactId>
+        </dependency>
+
+        <!-- 数据库驱动（运行期） -->
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- 数据库版本管理：建表脚本统一存放于 仓库根/script/sql/migration -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
+        </dependency>
+
+        <!-- 运维端点（健康检查等） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- JSON 结构化日志输出（logback-spring.xml 的 FILE/生产控制台 appender 使用）：
+             只在启动聚合模块引入，业务模块不感知日志实现，符合框架层收口原则 -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>8.1</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

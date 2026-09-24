@@ -1,0 +1,24 @@
+# ==== 构建产物 ====
+auth-backend/*/target/
+auth-backend/auth-base/*/target/
+auth-backend/auth-platform/*/target/
+auth-backend/auth-biz/*/target/
+auth-web/dist/
+auth-web/tsconfig.tsbuildinfo
+
+# ==== 依赖 ====
+auth-web/node_modules/
+
+# ==== 运行日志 / 本地环境 ====
+logs/
+*.log
+auth-web/.env.local
+
+# ==== IDE / 系统 ====
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# ==== 本地脚本产物 ====
+nohup.out

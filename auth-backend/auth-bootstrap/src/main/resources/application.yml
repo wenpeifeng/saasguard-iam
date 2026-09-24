@@ -1,0 +1,74 @@
+# ================= auth-center 后端全局配置 =================
+# 环境差异配置放 application-{profile}.yml，本文件只放与环境无关的部分。
+
+spring:
+  application:
+    name: auth-backend
+  profiles:
+    active: dev   # 开发环境；生产用 -Dspring.profiles.active=prod 覆盖
+
+  # Jackson：统一日期序列化格式（前端直接展示），时区东八区
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+
+  # 国际化（i18n）：中英双语消息文件（i18n/messages_zh_CN.properties / messages_en.properties）。
+  # 注意：auth-framework 的 I18nConfig 已显式装配 ResourceBundleMessageSource 并读取以下配置
+  # （存在自定义 MessageSource Bean 时 Spring Boot 自动配置退让），此处为唯一事实来源，
+  # 修改 basename/encoding 直接生效。文案与 key 规范见 docs/modules/i18n.md。
+  messages:
+    basename: i18n/messages
+    encoding: UTF-8
+    # 不回退服务器系统语言（不可控），统一由 LocaleResolver 默认 zh_CN + AuthMessages 中文兜底
+    fallback-to-system-locale: false
+
+  # Flyway：数据库版本管理。
+  # 建表脚本统一存放于 仓库根目录/script/sql/migration（用户要求的统一脚本管理），
+  # 因此以仓库根为工作目录启动（script/sh/start-all.sh 已保证）。
+  flyway:
+    enabled: true
+    locations: filesystem:script/sql/migration
+    baseline-on-migrate: true
+    encoding: UTF-8
+    # 并行开发场景：脚本版本号落盘顺序与提交顺序可能不一致，允许补执行历史间隙
+    out-of-order: true
+
+mybatis-plus:
+  configuration:
+    # 下划线列名自动映射驼峰属性（sys_user_name -> sysUserName）
+    map-underscore-to-camel-case: true
+    # 开发期打印 SQL，生产环境由日志级别控制
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    banner: false
+    db-config:
+      # 逻辑删除：deleted 字段 0-在用 1-已删
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+server:
+  port: 8082
+  servlet:
+    context-path: /api
+
+# springdoc / Swagger UI：/api/swagger-ui.html
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+# 日志：格式与级别统一由 logback-spring.xml 管理（三类日志规范见 docs/日志规范.md）。
+# - 级别：dev 业务 DEBUG（MyBatis Slf4j 打印 SQL）；prod/默认 INFO、MyBatis WARN；
+# - 文件：logging.file.path 注入 LOG_PATH，JSON 结构化输出 {LOG_PATH}/auth-backend.json
+#   （相对启动目录 = 仓库根/logs/，按天 + 100MB 滚动保留 30 天）；
+# - 注意：不要在 yml 里配 logging.level.*，否则会覆盖 logback-spring.xml 的 profile 分级。
+logging:
+  file:
+    path: logs
+
+# OIDC 签发者标识（iss claim 与发现文档；业务系统验签 JWKS 见 docs/业务系统接入指南.md）
+auth:
+  oidc:
+    issuer: http://localhost:8082/api

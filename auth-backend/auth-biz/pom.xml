@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <!-- auth-biz 分组壳：业务纵切模块（app=应用注册/分配，oidc=协议端点/令牌） -->
+    <parent>
+        <groupId>com.auth</groupId>
+        <artifactId>auth-backend</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>auth-biz</artifactId>
+    <packaging>pom</packaging>
+    <name>auth-biz</name>
+    <description>业务层分组：auth-biz-app + auth-biz-oidc</description>
+    <modules>
+        <module>auth-biz-app</module>
+        <module>auth-biz-oidc</module>
+    </modules>
+</project>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <!-- auth-base 分组壳：聚合 common 与 framework，子模块 parent 均直接继承根 POM -->
+    <parent>
+        <groupId>com.auth</groupId>
+        <artifactId>auth-backend</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>auth-base</artifactId>
+    <packaging>pom</packaging>
+    <name>auth-base</name>
+    <description>基础层分组：auth-common + auth-framework</description>
+    <modules>
+        <module>auth-common</module>
+        <module>auth-framework</module>
+    </modules>
+</project>
