@@ -149,8 +149,8 @@ start_backend() {
     remove_stale_pid "${BACKEND_PID_FILE}" "saasguard-iam-server"
 
     if managed_process_running "${BACKEND_PID_FILE}" "saasguard-iam-server"; then
-        success "后端已在运行：http://localhost:8082/api"
-        return
+        info "检测到本项目后端正在运行，先停止旧进程再重新启动"
+        stop_managed_process "后端" "${BACKEND_PID_FILE}" "saasguard-iam-server"
     fi
     port_is_open 8082 && die "端口 8082 已被其他进程占用。请释放端口后重试；脚本不会终止非本项目进程。"
 
@@ -179,18 +179,50 @@ start_backend() {
     success "后端已就绪：http://localhost:8082/api"
 }
 
+frontend_dependency_fingerprint() {
+    node -e '
+        const crypto = require("node:crypto");
+        const fs = require("node:fs");
+        const hash = crypto.createHash("sha256");
+        for (const file of process.argv.slice(1)) {
+            hash.update(file);
+            hash.update(fs.readFileSync(file));
+        }
+        process.stdout.write(hash.digest("hex"));
+    ' \
+        auth-web/package.json \
+        auth-web/pnpm-lock.yaml \
+        auth-web/pnpm-workspace.yaml
+}
+
+ensure_frontend_dependencies() {
+    local fingerprint
+    local fingerprint_file="auth-web/node_modules/.saasguard-dependencies.sha256"
+    fingerprint="$(frontend_dependency_fingerprint)"
+
+    if [[ -f auth-web/node_modules/vite/bin/vite.js \
+        && -f "${fingerprint_file}" \
+        && "$(<"${fingerprint_file}")" == "${fingerprint}" ]]; then
+        info "前端依赖未变化，直接复用现有 node_modules"
+        return
+    fi
+
+    info "首次安装或依赖文件已变化，安装前端依赖"
+    (cd auth-web && pnpm install --frozen-lockfile)
+    printf '%s\n' "${fingerprint}" > "${fingerprint_file}"
+}
+
 start_frontend() {
     remove_stale_pid "${FRONTEND_PID_FILE}" "vite/bin/vite.js"
 
     if managed_process_running "${FRONTEND_PID_FILE}" "vite/bin/vite.js"; then
-        success "前端已在运行：http://localhost:5174"
-        return
+        info "检测到本项目前端正在运行，先停止旧进程再重新启动"
+        stop_managed_process "前端" "${FRONTEND_PID_FILE}" "vite/bin/vite.js"
     fi
     port_is_open 5174 && die "端口 5174 已被其他进程占用。请释放端口后重试；脚本不会终止非本项目进程。"
 
     if [[ "${SKIP_INSTALL}" == false ]]; then
-        info "校验并安装前端依赖"
-        (cd auth-web && pnpm install --frozen-lockfile)
+        ensure_frontend_dependencies
     fi
     [[ -f auth-web/node_modules/vite/bin/vite.js ]] \
         || die "未找到 Vite。请去掉 --skip-install 后重试。"
