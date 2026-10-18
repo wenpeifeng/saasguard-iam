@@ -34,8 +34,8 @@ container_status() {
     local name="$1"
     local container="$2"
     local state="未创建"
-    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-        state="$(docker inspect --format '{{.State.Status}}{{if .State.Health}} / {{.State.Health.Status}}{{end}}' "${container}" 2>/dev/null || echo '未创建')"
+    if command -v docker >/dev/null 2>&1 && detect_docker_access; then
+        state="$(docker_cmd inspect --format '{{.State.Status}}{{if .State.Health}} / {{.State.Health.Status}}{{end}}' "${container}" 2>/dev/null || echo '未创建')"
     fi
     printf '%-12s %-24s %s\n' "${name}" "${state}" "${container}"
 }

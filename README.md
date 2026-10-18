@@ -215,7 +215,7 @@ saasguard-iam/
 
 ### 环境要求
 
-一键脚本会在修改项目运行状态前完成环境体检。出于系统权限和安装来源安全考虑，脚本不会静默安装开发工具；缺少工具时会立即停止，并按当前操作系统输出安装命令或官方文档。Docker 已安装但没有运行时，脚本会自动启动 Docker Desktop/Engine 并等待服务就绪。
+一键脚本会在修改项目运行状态前完成环境体检，并默认自动补齐缺失依赖：JDK、Maven、Node.js 和 pnpm 安装到仓库忽略的 `.run/tools/`，不会污染源码或提交到 Git；curl 通过系统包管理器安装，Docker 则使用 macOS Homebrew、Linux Docker 官方安装脚本或 Windows winget。安装 Docker 或系统软件时可能触发管理员密码/UAC，属于操作系统必须的安全确认。Docker 已安装但没有运行时，脚本会自动启动 Docker Desktop/Engine 并等待服务就绪。
 
 | 工具 | 最低要求 | 用途 |
 |---|---|---|
@@ -227,7 +227,7 @@ saasguard-iam/
 | Docker | 支持 Compose v2 | 运行 MySQL 与 Redis |
 | curl | 任意现代版本 | 健康检查 |
 
-macOS 可使用 Homebrew 安装主要依赖：
+通常无需手工执行下列安装命令。若希望自行准备环境，macOS 可使用 Homebrew：
 
 ```bash
 brew install openjdk@21 maven node pnpm
@@ -240,7 +240,7 @@ brew install --cask docker
 - Linux：按 [Docker Engine 官方安装文档](https://docs.docker.com/engine/install/) 安装 Engine 与 Compose v2 插件；
 - WSL2：安装 Windows Docker Desktop 并启用 WSL Integration。
 
-安装完成后无需预先手工启动 Docker，直接在仓库根目录执行：
+直接在仓库根目录执行即可自动检查、安装和启动：
 
 ```bash
 ./script/sh/start-all.sh
@@ -249,12 +249,14 @@ brew install --cask docker
 脚本会依次执行：
 
 1. 一次性检查 curl、JDK 21、Maven 3.9+、Node.js 20+、pnpm 9+、Docker、Compose v2、已有构建产物和 8082/5174 端口；
-2. Docker 未运行时，按 macOS、Linux、Windows/WSL 环境尝试自动启动，并等待最多 120 秒；
-3. Docker 未安装或无法自动启动时，在启动任何项目组件前终止并输出对应安装/启动方法；
+2. 自动安装缺失或版本不符合要求的开发工具；macOS 使用 Homebrew 安装 Docker Desktop，Linux 使用 Docker 官方安装脚本，Windows/WSL 使用 winget；
+3. Docker 未运行时，按 macOS、Linux、Windows/WSL 环境尝试自动启动，并等待最多 120 秒；
 4. 创建或启动 MySQL 8 与 Redis 7，并等待健康检查通过；
 5. 构建后端、执行 Flyway 迁移、后台启动 Spring Boot；
 6. 按锁文件安装前端依赖、后台启动 Vite；
 7. 等待前后端健康检查通过并输出访问地址。
+
+在 Linux 上首次安装 Docker 时，脚本会把当前用户加入 `docker` 用户组；本次启动临时通过 `sudo` 继续执行，重新登录后即可直接使用 Docker。macOS/Windows 首次启动 Docker Desktop 时，仍需按系统弹窗接受许可与授权，这是 Docker Desktop 本身无法绕过的一次性安全步骤。
 
 脚本支持重复执行：已由当前仓库启动的进程会被识别并跳过；如果端口被其他进程占用，脚本会明确报错，不会直接杀死其他项目。
 
@@ -266,7 +268,8 @@ brew install --cask docker
 ./script/sh/start-all.sh --no-infra --backend-only  # 后端使用外部/已有 MySQL、Redis
 ./script/sh/start-all.sh --skip-build               # 使用已有后端 JAR
 ./script/sh/start-all.sh --skip-install             # 使用已有前端 node_modules
-./script/sh/start-all.sh --check-only               # 只做完整环境体检，不启动项目组件
+./script/sh/start-all.sh --check-only               # 检查并自动补齐环境，不启动项目组件
+./script/sh/start-all.sh --no-auto-install          # 禁止自动安装，缺失依赖时直接停止
 ./script/sh/start-all.sh --help                     # 查看全部选项
 ```
 

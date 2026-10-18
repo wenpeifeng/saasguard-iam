@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # SaaSGuard IAM 一键启动：基础设施 -> 后端 -> 前端。
-# 用法：./script/sh/start-all.sh [--backend-only|--web-only] [--no-infra] [--skip-build] [--skip-install] [--check-only]
+# 用法：./script/sh/start-all.sh [--backend-only|--web-only] [--no-infra] [--skip-build] [--skip-install] [--check-only] [--no-auto-install]
 
 set -euo pipefail
 
@@ -14,6 +14,7 @@ START_INFRA=true
 SKIP_BUILD=false
 SKIP_INSTALL=false
 CHECK_ONLY=false
+export AUTO_INSTALL=true
 
 usage() {
     cat <<'EOF'
@@ -28,7 +29,9 @@ SaaSGuard IAM 一键启动
   --no-infra      不启动 MySQL、Redis（使用已配置的外部基础设施）
   --skip-build    跳过 Maven 后端构建（需要已有 JAR）
   --skip-install  跳过 pnpm install（需要已有 node_modules）
-  --check-only    仅完成前置环境检查（Docker 未运行时仍会尝试启动）
+  --check-only    检查并自动补齐环境，但不启动项目组件
+  --no-auto-install
+                  只检查依赖，缺少工具时停止，不执行自动安装
   -h, --help      显示帮助
 EOF
 }
@@ -41,6 +44,7 @@ while [[ $# -gt 0 ]]; do
         --skip-build) SKIP_BUILD=true ;;
         --skip-install) SKIP_INSTALL=true ;;
         --check-only) CHECK_ONLY=true ;;
+        --no-auto-install) export AUTO_INSTALL=false ;;
         -h|--help) usage; exit 0 ;;
         *) usage; die "未知选项：$1" ;;
     esac
@@ -51,7 +55,7 @@ cd "${PROJECT_ROOT}"
 
 preflight_environment() {
     info "执行启动前置环境检查"
-    require_command curl "请安装 curl（健康检查需要）。"
+    ensure_curl
 
     if [[ "${MODE}" != "web" ]]; then
         configure_java_21
@@ -90,39 +94,41 @@ preflight_environment() {
 
     success "前置环境检查通过"
     if [[ "${MODE}" != "web" ]]; then
-        local backend_summary="Java $(java_major_version "${JAVA_HOME}/bin/java")"
+        local backend_summary
+        backend_summary="Java $(java_major_version "${JAVA_HOME}/bin/java")"
         [[ "${SKIP_BUILD}" == true ]] || backend_summary="${backend_summary} / Maven $(mvn -version | awk 'NR == 1 { print $3 }')"
         info "后端环境：${backend_summary}"
     fi
     if [[ "${MODE}" != "backend" ]]; then
-        local frontend_summary="Node $(node --version)"
+        local frontend_summary
+        frontend_summary="Node $(node --version)"
         [[ "${SKIP_INSTALL}" == true ]] || frontend_summary="${frontend_summary} / pnpm $(pnpm --version)"
         info "前端环境：${frontend_summary}"
     fi
     if [[ "${MODE}" != "web" && "${START_INFRA}" == true ]]; then
-        info "容器环境：Docker $(docker version --format '{{.Server.Version}}') / Compose $(docker compose version --short)"
+        info "容器环境：Docker $(docker_cmd version --format '{{.Server.Version}}') / Compose $(docker_cmd compose version --short)"
     fi
 }
 
 start_infrastructure() {
     info "启动 MySQL 8 与 Redis 7（重复执行是安全的）"
-    if docker inspect auth-mysql >/dev/null 2>&1; then
+    if docker_cmd inspect auth-mysql >/dev/null 2>&1; then
         info "复用已存在的 auth-mysql 容器"
-        docker start auth-mysql >/dev/null
+        docker_cmd start auth-mysql >/dev/null
     else
-        docker compose up -d mysql
+        docker_cmd compose up -d mysql
     fi
-    if docker inspect auth-redis >/dev/null 2>&1; then
+    if docker_cmd inspect auth-redis >/dev/null 2>&1; then
         info "复用已存在的 auth-redis 容器"
-        docker start auth-redis >/dev/null
+        docker_cmd start auth-redis >/dev/null
     else
-        docker compose up -d redis
+        docker_cmd compose up -d redis
     fi
 
     info "等待 MySQL 健康检查通过"
     local i health
     for ((i = 1; i <= 40; i++)); do
-        health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' auth-mysql 2>/dev/null || true)"
+        health="$(docker_cmd inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' auth-mysql 2>/dev/null || true)"
         [[ "${health}" == "healthy" ]] && break
         [[ "${health}" == "unhealthy" ]] && die "MySQL 健康检查失败，请执行：docker logs auth-mysql"
         [[ "${i}" -eq 40 ]] && die "MySQL 80 秒内未就绪，请执行：docker logs auth-mysql"
@@ -130,7 +136,7 @@ start_infrastructure() {
     done
 
     for ((i = 1; i <= 20; i++)); do
-        health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' auth-redis 2>/dev/null || true)"
+        health="$(docker_cmd inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' auth-redis 2>/dev/null || true)"
         [[ "${health}" == "healthy" ]] && break
         [[ "${health}" == "unhealthy" ]] && die "Redis 健康检查失败，请执行：docker logs auth-redis"
         [[ "${i}" -eq 20 ]] && die "Redis 40 秒内未就绪，请执行：docker logs auth-redis"

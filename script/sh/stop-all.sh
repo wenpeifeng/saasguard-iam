@@ -39,10 +39,16 @@ stop_managed_process "后端" "${BACKEND_PID_FILE}" "saasguard-iam-server"
 
 if [[ "${STOP_INFRA}" == true ]]; then
     require_command docker "请安装 Docker。"
-    if docker info >/dev/null 2>&1; then
+    if ! detect_docker_access \
+        && [[ "$(uname -s 2>/dev/null || true)" == Linux ]] \
+        && command -v sudo >/dev/null 2>&1; then
+        sudo -v
+        detect_docker_access || true
+    fi
+    if detect_docker_access; then
         for container in auth-mysql auth-redis; do
-            if docker inspect "${container}" >/dev/null 2>&1; then
-                docker stop "${container}" >/dev/null
+            if docker_cmd inspect "${container}" >/dev/null 2>&1; then
+                docker_cmd stop "${container}" >/dev/null
             fi
         done
         success "MySQL 与 Redis 已停止，数据卷已保留"
