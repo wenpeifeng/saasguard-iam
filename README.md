@@ -180,14 +180,11 @@ saasguard-iam/
 │   └── auth-bootstrap/        # 可执行服务
 ├── auth-web/                  # React 管理控制台与 OIDC 登录/授权页
 ├── script/
-│   ├── sh/                    # 一键启停、状态检查与公共脚本
+│   ├── sh/                    # start-all/stop-all/status-all 一键运维脚本
 │   ├── sql/migration/         # Flyway 建表与初始化数据
 │   └── demo/                  # 演示数据与 OIDC 流程脚本
 ├── docs/                      # 架构、接入、验收和模块文档
-├── docker-compose.yml         # MySQL 8 + Redis 7
-├── start.sh                   # 根目录一键启动入口
-├── stop.sh                    # 根目录一键关闭入口
-└── status.sh                  # 根目录状态检查入口
+└── docker-compose.yml         # MySQL 8 + Redis 7
 ```
 
 ## 一键启动
@@ -215,7 +212,7 @@ brew install openjdk@21 maven node pnpm
 确保 Docker Desktop 已启动，然后在仓库根目录执行：
 
 ```bash
-./start.sh
+./script/sh/start-all.sh
 ```
 
 脚本会依次执行：
@@ -231,12 +228,12 @@ brew install openjdk@21 maven node pnpm
 ### 启动选项
 
 ```bash
-./start.sh --backend-only             # 只启动基础设施和后端
-./start.sh --web-only                 # 只启动前端
-./start.sh --no-infra --backend-only  # 后端使用外部/已有 MySQL、Redis
-./start.sh --skip-build               # 使用已有后端 JAR
-./start.sh --skip-install             # 使用已有前端 node_modules
-./start.sh --help                     # 查看全部选项
+./script/sh/start-all.sh --backend-only             # 只启动基础设施和后端
+./script/sh/start-all.sh --web-only                 # 只启动前端
+./script/sh/start-all.sh --no-infra --backend-only  # 后端使用外部/已有 MySQL、Redis
+./script/sh/start-all.sh --skip-build               # 使用已有后端 JAR
+./script/sh/start-all.sh --skip-install             # 使用已有前端 node_modules
+./script/sh/start-all.sh --help                     # 查看全部选项
 ```
 
 ### 服务地址
@@ -253,7 +250,7 @@ brew install openjdk@21 maven node pnpm
 ### 状态与日志
 
 ```bash
-./status.sh
+./script/sh/status-all.sh
 tail -f logs/backend.log
 tail -f logs/frontend.log
 docker logs -f auth-mysql
@@ -267,21 +264,21 @@ docker logs -f auth-redis
 仅关闭前后端，保留 MySQL、Redis 和现有数据：
 
 ```bash
-./stop.sh
+./script/sh/stop-all.sh
 ```
 
 同时停止前后端、MySQL 和 Redis，但保留 Docker 数据卷：
 
 ```bash
-./stop.sh --with-infra
+./script/sh/stop-all.sh --with-infra
 ```
 
-下次执行 `./start.sh` 会继续使用原有数据。需要彻底清空本地数据库并重新生成演示基线时，可执行以下命令：
+下次执行 `./script/sh/start-all.sh` 会继续使用原有数据。需要彻底清空本地数据库并重新生成演示基线时，可执行以下命令：
 
 ```bash
-./stop.sh --with-infra
+./script/sh/stop-all.sh --with-infra
 docker compose down -v
-./start.sh
+./script/sh/start-all.sh
 ```
 
 > `docker compose down -v` 会永久删除当前项目的本地 MySQL/Redis 数据卷，请确认没有需要保留的数据后再执行。
@@ -358,7 +355,7 @@ pnpm build
 ### 脚本静态检查
 
 ```bash
-bash -n start.sh stop.sh status.sh script/sh/*.sh
+bash -n script/sh/*.sh
 ```
 
 GitHub Actions 会执行前端生产构建、后端打包和身份链路集成测试。集成测试覆盖人员生命周期、应用分配、OIDC、离职失效、组织规则、并发工号、租户隔离和服务令牌撤销。

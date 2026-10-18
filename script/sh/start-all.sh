@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # SaaSGuard IAM 一键启动：基础设施 -> 后端 -> 前端。
-# 用法：./start.sh [--backend-only|--web-only] [--no-infra] [--skip-build] [--skip-install]
+# 用法：./script/sh/start-all.sh [--backend-only|--web-only] [--no-infra] [--skip-build] [--skip-install]
 
 set -euo pipefail
 
@@ -19,7 +19,7 @@ usage() {
 SaaSGuard IAM 一键启动
 
 用法：
-  ./start.sh [选项]
+  ./script/sh/start-all.sh [选项]
 
 选项：
   --backend-only  仅启动 MySQL、Redis 和后端
@@ -172,6 +172,6 @@ success "启动完成"
 printf '  管理控制台  http://localhost:5174\n'
 printf '  后端 API    http://localhost:8082/api\n'
 printf '  Swagger     http://localhost:8082/api/swagger-ui.html\n'
-printf '  状态检查    ./status.sh\n'
-printf '  停止服务    ./stop.sh\n'
+printf '  状态检查    ./script/sh/status-all.sh\n'
+printf '  停止服务    ./script/sh/stop-all.sh\n'
 printf '  查看日志    tail -f logs/backend.log logs/frontend.log\n'

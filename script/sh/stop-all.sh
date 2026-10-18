@@ -15,7 +15,7 @@ usage() {
 SaaSGuard IAM 一键停止
 
 用法：
-  ./stop.sh [--with-infra]
+  ./script/sh/stop-all.sh [--with-infra]
 
 选项：
   --with-infra  同时停止 MySQL、Redis 容器，但保留数据库数据卷
@@ -50,7 +50,7 @@ if [[ "${STOP_INFRA}" == true ]]; then
         warn "Docker 服务未运行，跳过基础设施停止"
     fi
 else
-    info "MySQL 与 Redis 保持运行；如需一并停止，请执行：./stop.sh --with-infra"
+    info "MySQL 与 Redis 保持运行；如需一并停止，请执行：./script/sh/stop-all.sh --with-infra"
 fi
 
 if port_is_open 5174; then
