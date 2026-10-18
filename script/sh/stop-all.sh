@@ -1,26 +1,62 @@
-#!/bin/bash
-# SaaSGuard IAM 一键停止脚本
-# 停止：后端 java 进程、前端 dev server；数据库容器默认保留（--with-db 时一并停止）
+#!/usr/bin/env bash
 
-PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-log() { echo -e "\033[36m[STOP]\033[0m $1"; }
+# SaaSGuard IAM 一键停止。默认保留 MySQL/Redis；--with-infra 会停止容器但保留数据卷。
 
-# 停后端（优先用 pid 文件，兜底按端口杀）
-if [ -f "${PROJECT_ROOT}/script/logs/backend.pid" ]; then
-    PID=$(cat "${PROJECT_ROOT}/script/logs/backend.pid")
-    if kill -0 "${PID}" 2>/dev/null; then kill "${PID}" && log "后端已停止 (pid ${PID})"; fi
-    rm -f "${PROJECT_ROOT}/script/logs/backend.pid"
-fi
-lsof -t -i :8082 -sTCP:LISTEN 2>/dev/null | xargs kill 2>/dev/null
+set -euo pipefail
 
-# 停前端
-lsof -t -i :5174 -sTCP:LISTEN 2>/dev/null | xargs kill 2>/dev/null && log "前端已停止"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common.sh
+source "${SCRIPT_DIR}/common.sh"
 
-# 可选：连数据库一起停
-if [ "$1" == "--with-db" ]; then
-    docker stop auth-mysql auth-redis >/dev/null 2>&1 && log "MySQL/Redis 容器已停止（数据保留）"
+STOP_INFRA=false
+
+usage() {
+    cat <<'EOF'
+SaaSGuard IAM 一键停止
+
+用法：
+  ./stop.sh [--with-infra]
+
+选项：
+  --with-infra  同时停止 MySQL、Redis 容器，但保留数据库数据卷
+  --with-db     --with-infra 的兼容别名
+  -h, --help    显示帮助
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --with-infra|--with-db) STOP_INFRA=true ;;
+        -h|--help) usage; exit 0 ;;
+        *) usage; die "未知选项：$1" ;;
+    esac
+    shift
+done
+
+cd "${PROJECT_ROOT}"
+stop_managed_process "前端" "${FRONTEND_PID_FILE}" "vite/bin/vite.js"
+stop_managed_process "后端" "${BACKEND_PID_FILE}" "saasguard-iam-server"
+
+if [[ "${STOP_INFRA}" == true ]]; then
+    require_command docker "请安装 Docker。"
+    if docker info >/dev/null 2>&1; then
+        for container in auth-mysql auth-redis; do
+            if docker inspect "${container}" >/dev/null 2>&1; then
+                docker stop "${container}" >/dev/null
+            fi
+        done
+        success "MySQL 与 Redis 已停止，数据卷已保留"
+    else
+        warn "Docker 服务未运行，跳过基础设施停止"
+    fi
 else
-    log "数据库容器保持运行（如需停止: $0 --with-db）"
+    info "MySQL 与 Redis 保持运行；如需一并停止，请执行：./stop.sh --with-infra"
 fi
 
-log "完成 ✓"
+if port_is_open 5174; then
+    warn "端口 5174 仍被非本脚本管理的进程占用"
+fi
+if port_is_open 8082; then
+    warn "端口 8082 仍被非本脚本管理的进程占用"
+fi
+success "停止完成"

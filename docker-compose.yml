@@ -1,3 +1,5 @@
+name: saasguard-iam
+
 services:
   mysql:
     image: mysql:8
