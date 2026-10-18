@@ -1,5 +1,6 @@
 package com.auth.oidc.security;
 
+import com.auth.framework.context.TenantContextHolder;
 import com.auth.oidc.service.OidcTokenService;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
@@ -30,6 +31,9 @@ import java.util.List;
 public class ServiceTokenFilter extends OncePerRequestFilter {
 
     private final OidcTokenService tokenService;
+    private final com.auth.system.service.TenantService tenantService;
+    private final com.auth.app.service.AppClientService clientService;
+    private final com.auth.app.security.ServiceTokenSessionRegistry serviceSessions;
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
@@ -45,12 +49,22 @@ public class ServiceTokenFilter extends OncePerRequestFilter {
         if (header != null && header.startsWith("Bearer ")
                 && SecurityContextHolder.getContext().getAuthentication() == null) {
             try {
-                Claims claims = tokenService.parse(header.substring(7).trim());
+                String token = header.substring(7).trim();
+                Claims claims = tokenService.parse(token);
                 boolean usable = "service".equals(claims.get(OidcTokenService.CLAIM_TOKEN_USE))
                         && claims.getAudience() != null && !claims.getAudience().isEmpty()
                         && !tokenService.isRevoked(claims.getId());
                 if (usable) {
                     String clientId = claims.getAudience().iterator().next();
+                    Long tenantId = claimTenantId(claims);
+                    if (tenantId == null || !tenantService.isActive(tenantId)) {
+                        throw new IllegalArgumentException("service token tenant is missing or inactive");
+                    }
+                    TenantContextHolder.set(new TenantContextHolder.TenantContext(tenantId));
+                    if (clientService.loadEnabledClient(clientId) == null
+                            || !serviceSessions.isActive(tenantId, clientId, token)) {
+                        throw new IllegalArgumentException("service token session is inactive");
+                    }
                     UsernamePasswordAuthenticationToken authentication =
                             new UsernamePasswordAuthenticationToken(clientId, null,
                                     List.of(new SimpleGrantedAuthority("ROLE_SERVICE")));
@@ -63,7 +77,13 @@ public class ServiceTokenFilter extends OncePerRequestFilter {
         try {
             filterChain.doFilter(request, response);
         } finally {
+            TenantContextHolder.clear();
             SecurityContextHolder.clearContext();
         }
+    }
+
+    private Long claimTenantId(Claims claims) {
+        Object value = claims.get("tenantId");
+        return value instanceof Number number ? number.longValue() : null;
     }
 }

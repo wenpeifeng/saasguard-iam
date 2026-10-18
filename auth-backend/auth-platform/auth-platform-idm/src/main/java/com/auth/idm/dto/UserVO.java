@@ -49,4 +49,10 @@ public class UserVO {
 
     /** 创建时间 */
     private LocalDateTime createTime;
+
+    /** 账号来源：MANUAL / SEED */
+    private String accountSource;
+
+    /** 是否为只读种子主档 */
+    private Boolean immutable;
 }

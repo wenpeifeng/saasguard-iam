@@ -3,6 +3,8 @@ package com.auth.app.dto;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.util.List;
@@ -15,10 +17,12 @@ public class ClientForm {
 
     /** 客户端标识（创建后不可改） */
     @NotBlank(message = "client_id 不能为空")
+    @Pattern(regexp = "^[A-Za-z0-9][A-Za-z0-9._:-]{1,63}$", message = "client_id 格式不正确")
     private String clientId;
 
     /** 应用名称 */
     @NotBlank(message = "应用名称不能为空")
+    @Size(max = 128, message = "应用名称不能超过 128 个字符")
     private String appName;
 
     /** 回调地址 */
@@ -40,6 +44,7 @@ public class ClientForm {
     private String remark;
 
     /** 应用声明的角色标签（整体替换语义：以本清单为准） */
+    @jakarta.validation.Valid
     private List<RoleItem> roles;
 
     /** 角色标签项 */
@@ -47,6 +52,7 @@ public class ClientForm {
     public static class RoleItem {
         /** 角色标签（如 erp.admin） */
         @NotBlank(message = "角色编码不能为空")
+        @Pattern(regexp = "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$", message = "角色编码格式不正确")
         private String roleCode;
         /** 角色名称 */
         @NotBlank(message = "角色名称不能为空")

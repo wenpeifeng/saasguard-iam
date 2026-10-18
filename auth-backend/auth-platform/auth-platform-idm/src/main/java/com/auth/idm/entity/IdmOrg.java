@@ -19,6 +19,9 @@ public class IdmOrg extends BaseEntity {
     /** 组织名称 */
     private String name;
 
+    /** 组织类型，历史未分类节点为 OTHER。 */
+    private OrgType orgType;
+
     /** 上级组织 ID（0=根节点） */
     private Long parentId;
 

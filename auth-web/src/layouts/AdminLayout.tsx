@@ -1,33 +1,40 @@
-import { useMemo, useState } from 'react'
+import { startTransition, useMemo } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Layout, Menu, Dropdown, Avatar, Space } from 'antd'
+import { Avatar, Breadcrumb, Dropdown, Layout, Menu } from 'antd'
 import type { MenuProps } from 'antd'
 import {
-  UserOutlined,
   ApartmentOutlined,
-  LogoutOutlined,
-  SafetyOutlined,
   AppstoreOutlined,
-  FileTextOutlined,
   FileSearchOutlined,
   KeyOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
+  LogoutOutlined,
+  SafetyCertificateOutlined,
+  CloudServerOutlined,
+  UserOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '@/stores/auth'
 
-const { Header, Sider, Content } = Layout;
+const { Header, Sider, Content } = Layout
 
-/**
- * 管理门户菜单。key 即路由路径；P2 追加"应用管理/角色标签"，
- * P3 追加"审计日志"，届时在此扩展。
- */
-const ADMIN_MENUS: Required<MenuProps>['items'] = [
-  { key: '/users', icon: <UserOutlined />, label: '主账号管理' },
-  { key: '/orgs', icon: <ApartmentOutlined />, label: '组织架构' },
-  { key: '/apps', icon: <AppstoreOutlined />, label: '应用管理' },
+const ADMIN_MENUS: MenuProps['items'] = [
   {
-    key: 'audit', icon: <FileTextOutlined />, label: '审计日志',
+    type: 'group', key: 'saas-platform', label: 'SaaS 平台',
+    children: [{ key: '/tenants', icon: <CloudServerOutlined />, label: '租户管理' }],
+  },
+  {
+    type: 'group',
+    key: 'identity-access',
+    label: '身份与访问',
+    children: [
+      { key: '/users', icon: <UserOutlined />, label: '主账号管理' },
+      { key: '/orgs', icon: <ApartmentOutlined />, label: '组织架构' },
+      { key: '/apps', icon: <AppstoreOutlined />, label: '应用管理' },
+    ],
+  },
+  {
+    type: 'group',
+    key: 'security-audit',
+    label: '安全与审计',
     children: [
       { key: '/audit/login-logs', icon: <KeyOutlined />, label: '登录日志' },
       { key: '/audit/op-logs', icon: <FileSearchOutlined />, label: '操作日志' },
@@ -35,35 +42,24 @@ const ADMIN_MENUS: Required<MenuProps>['items'] = [
   },
 ]
 
-/** 当前路径 → 顶栏面包屑文案 */
-function breadcrumb(pathname: string): string {
-  const entry = ADMIN_MENUS?.find((m) => {
-    if (m && 'children' in m && m.children) {
-      return m.children.some((c) => c && 'key' in c && c.key === pathname)
-    }
-    return m && 'key' in m && m.key === pathname
-  })
-  const top = entry && 'label' in entry && typeof entry.label === 'string' ? entry.label : ''
-  const sub = (() => {
-    if (entry && 'children' in entry && entry.children) {
-      const child = entry.children.find((c) => c && 'key' in c && c.key === pathname)
-      return child && 'label' in child && typeof child.label === 'string' ? ` / ${child.label}` : ''
-    }
-    return ''
-  })()
-  return `认证中心${top ? ' / ' + top : ''}${sub}`
+const PAGE_META: Record<string, { group: string; title: string }> = {
+  '/tenants': { group: 'SaaS 平台', title: '租户管理' },
+  '/users': { group: '身份与访问', title: '主账号管理' },
+  '/orgs': { group: '身份与访问', title: '组织架构' },
+  '/apps': { group: '身份与访问', title: '应用管理' },
+  '/audit/login-logs': { group: '安全与审计', title: '登录日志' },
+  '/audit/op-logs': { group: '安全与审计', title: '操作日志' },
 }
 
-/**
- * 认证中心管理端布局 —— 现代浅色工作台：
- * 深蓝渐变悬浮侧边栏（圆角卡片式）+ 白色顶栏（面包屑）+ 柔灰内容区（路由切换渐入）。
- * P2 的统一登录页/授权页挂在 /login、/oauth，不经过本布局。
- */
+/** SaaSGuard IAM 管理工作台。 */
 export default function AdminLayout() {
-  const [collapsed, setCollapsed] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
-  const { user, token, logout } = useAuthStore()
+  const { user, token, logout, activeTenantName } = useAuthStore()
+  const pageMeta = PAGE_META[location.pathname]
+  const visibleMenus = user?.roles.includes('SUPER_ADMIN')
+    ? ADMIN_MENUS
+    : ADMIN_MENUS?.filter((item) => item && 'key' in item && item.key !== 'saas-platform')
 
   const userMenu: MenuProps['items'] = useMemo(
     () => [
@@ -72,129 +68,81 @@ export default function AdminLayout() {
         icon: <LogoutOutlined />,
         label: '退出登录',
         onClick: () => {
-          // 通知后端拉黑 JWT（best-effort），本地态无条件清理
           void fetch('/api/auth/logout', {
             method: 'POST',
             headers: { Authorization: `Bearer ${token}` },
           }).catch(() => undefined)
           logout()
-          navigate('/login', { replace: true })
+          // 登录页为懒加载路由；同步点击事件内切换时用 transition，避免 React
+          // “component suspended while responding to synchronous input” 整页错误。
+          startTransition(() => navigate('/login', { replace: true }))
         },
       },
     ],
     [token, logout, navigate],
   )
 
+  const displayName = user?.realName ?? user?.username ?? '未登录'
+
   return (
-    <Layout style={{ height: '100vh', background: '#f0f3f9' }}>
-      {/* 悬浮圆角侧边栏（内边距留出卡片效果） */}
-      <div style={{ padding: '10px 0 10px 10px', height: '100%' }}>
-        <Sider
-          trigger={null}
-          collapsible
-          collapsed={collapsed}
-          width={228}
-          style={{
-            height: '100%',
-            overflow: 'auto',
-            borderRadius: 16,
-            background: 'linear-gradient(180deg, #101f3c 0%, #152a52 70%, #1b3563 100%)',
-            boxShadow: '4px 0 24px rgba(16,31,60,0.18)',
-            position: 'sticky',
-            top: 10,
-          }}
-          className="thin-scroll"
-        >
-          <div
-            style={{
-              height: 60,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 9,
-              color: '#fff',
-              fontSize: 16,
-              fontWeight: 650,
-            }}
-          >
-            <Avatar
-              shape="square"
-              size={32}
-              style={{ background: 'linear-gradient(135deg,#3b82f6,#22d3ee)', borderRadius: 9 }}
-            >
-              A
-            </Avatar>
-            {!collapsed && <span style={{ letterSpacing: 1 }}>统一认证中心</span>}
+    <Layout className="admin-shell">
+      <Sider
+        width="clamp(220px, 18vw, 244px)"
+        theme="light"
+        className="admin-sider thin-scroll"
+      >
+        <div className="admin-brand">
+          <span className="admin-brand-mark" aria-hidden="true">
+            <SafetyCertificateOutlined />
+          </span>
+          <span className="admin-brand-copy">
+            <b>SaaSGuard IAM</b>
+            <small>IDENTITY FABRIC</small>
+          </span>
+        </div>
+
+        <Menu
+          mode="inline"
+          selectedKeys={[location.pathname]}
+          items={visibleMenus}
+          onClick={({ key }) => navigate(key)}
+          className="admin-nav"
+        />
+
+        <div className="admin-sider-foot">
+          <span className="admin-sider-foot-dot" />
+          身份服务运行中
+        </div>
+      </Sider>
+
+      <Layout className="admin-main">
+        <Header className="admin-header">
+          <div className="admin-header-start">
+            <Breadcrumb
+              items={[
+                { title: 'SaaSGuard IAM' },
+                ...(pageMeta ? [{ title: pageMeta.group }, { title: pageMeta.title }] : []),
+              ]}
+            />
           </div>
-          <Menu
-            theme="dark"
-            mode="inline"
-            selectedKeys={[location.pathname]}
-            defaultOpenKeys={['audit']}
-            items={ADMIN_MENUS}
-            onClick={({ key }) => navigate(key)}
-            style={{ background: 'transparent', borderInlineEnd: 'none', padding: '4px 8px' }}
-          />
-        </Sider>
-      </div>
 
-      <Layout style={{ background: 'transparent' }}>
-        <Header
-          style={{
-            background: 'rgba(255,255,255,0.85)',
-            backdropFilter: 'blur(12px)',
-            margin: '10px 10px 0',
-            padding: '0 20px',
-            borderRadius: 14,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            boxShadow: '0 2px 12px rgba(16,31,60,0.06)',
-          }}
-        >
-          <Space size={4}>
-            <span
-              onClick={() => setCollapsed(!collapsed)}
-              style={{ cursor: 'pointer', fontSize: 16, color: '#334155' }}
-            >
-              {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-            </span>
-            <span style={{ color: '#64748b', fontSize: 13.5, marginLeft: 10 }}>
-              {breadcrumb(location.pathname)}
-            </span>
-          </Space>
-
-          <Space size={12}>
-            <span
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                fontSize: 12, fontWeight: 600, letterSpacing: 1.5,
-                color: '#2563eb', background: 'rgba(37,99,235,0.08)',
-                padding: '3px 10px', borderRadius: 999,
-              }}
-            >
-              <SafetyOutlined /> AUTH CENTER
+          <div className="admin-header-end">
+            <span className="admin-environment">租户：{activeTenantName ?? user?.tenantName ?? '-'}</span>
+            <span className="admin-environment">
+              <span />
+              身份服务在线
             </span>
             <Dropdown menu={{ items: userMenu }} placement="bottomRight">
-              <Space style={{ cursor: 'pointer', paddingLeft: 4 }}>
-                <Avatar
-                  size={32}
-                  style={{ background: 'linear-gradient(135deg,#3b82f6,#2563eb)' }}
-                  icon={<UserOutlined />}
-                />
-                <span style={{ color: '#1e293b', fontWeight: 500 }}>
-                  {user?.realName ?? user?.username ?? '未登录'}
-                </span>
-              </Space>
+              <button type="button" className="admin-user">
+                <Avatar size={32} icon={<UserOutlined />} />
+                <span>{displayName}</span>
+              </button>
             </Dropdown>
-          </Space>
+          </div>
         </Header>
 
-        <Content
-          className="thin-scroll"
-          style={{ overflow: 'auto', padding: 14 }}
-        >
-          <div key={location.pathname} className="page-fade" style={{ minHeight: 'calc(100vh - 88px)' }}>
+        <Content className="admin-content thin-scroll">
+          <div key={location.pathname} className="admin-page-frame page-fade">
             <Outlet />
           </div>
         </Content>

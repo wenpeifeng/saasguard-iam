@@ -12,6 +12,15 @@ import java.util.List;
 @Builder
 public class LoginVO {
 
+    /** 当前租户 ID */
+    private Long tenantId;
+
+    /** 当前租户代码 */
+    private String tenantCode;
+
+    /** 当前租户名称 */
+    private String tenantName;
+
     /** JWT 访问令牌（后续请求 Authorization: Bearer {token}） */
     private String token;
 

@@ -1,6 +1,7 @@
 package com.auth.system.audit;
 
 import com.auth.framework.log.MdcKeys;
+import com.auth.framework.context.TenantContextHolder;
 import com.auth.system.entity.AuditOpLog;
 import com.auth.system.service.AuditService;
 import jakarta.servlet.FilterChain;
@@ -61,7 +62,10 @@ public class OpLogFilter extends OncePerRequestFilter {
             return true;
         }
         String uri = request.getRequestURI();
-        return EXCLUDED_PREFIXES.stream().anyMatch(uri::startsWith);
+        String contextPath = request.getContextPath();
+        String path = contextPath != null && !contextPath.isEmpty() && uri.startsWith(contextPath)
+                ? uri.substring(contextPath.length()) : uri;
+        return EXCLUDED_PREFIXES.stream().anyMatch(path::startsWith);
     }
 
     @Override
@@ -82,6 +86,8 @@ public class OpLogFilter extends OncePerRequestFilter {
                         HttpServletResponse response, long costMs) {
         try {
             AuditOpLog entry = new AuditOpLog();
+            // 必须在请求线程捕获；AuditService 在异步线程中无法读取本线程的租户上下文。
+            entry.setTenantId(TenantContextHolder.getTenantId());
             Authentication auth = SecurityContextHolder.getContext().getAuthentication();
             if (auth != null && auth.getPrincipal() instanceof Long userId) {
                 entry.setUserId(userId);
@@ -111,7 +117,10 @@ public class OpLogFilter extends OncePerRequestFilter {
         }
         String body = new String(content, StandardCharsets.UTF_8).replaceAll("\\s+", " ").trim();
         for (String field : SENSITIVE_FIELDS) {
-            body = body.replaceAll("(\"%s\"\\s*:\\s*\")[^\"]*(\")".formatted(field), "$1***$2");
+            // JSON: {"password":"..."}
+            body = body.replaceAll("(?i)(\"%s\"\\s*:\\s*\")[^\"]*(\")".formatted(field), "$1***$2");
+            // application/x-www-form-urlencoded: password=...&client_id=...
+            body = body.replaceAll("(?i)(^|&)(%s=)[^&]*".formatted(field), "$1$2***");
         }
         return body.length() > DETAIL_MAX ? body.substring(0, DETAIL_MAX) : body;
     }

@@ -8,7 +8,7 @@ export type AuthResp = {
 } & LoginUser
 
 /** 管理端登录（主账号 idm_user，用户名或工号 + 密码；loginType/clientId 供登录日志审计） */
-export function login(body: { username: string; password: string; loginType?: string; clientId?: string }) {
+export function login(body: { tenantCode?: string; username: string; password: string; loginType?: string; clientId?: string }) {
   return post<AuthResp>('/auth/login', body)
 }
 

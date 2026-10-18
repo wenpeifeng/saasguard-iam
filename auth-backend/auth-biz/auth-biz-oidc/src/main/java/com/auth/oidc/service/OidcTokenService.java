@@ -5,6 +5,7 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.security.PrivateKey;
@@ -38,6 +39,11 @@ public class OidcTokenService {
 
     private final TokenKeyService tokenKeyService;
     private final StringRedisTemplate redis;
+    private final com.auth.system.security.JwtTokenProvider sessions;
+    private final com.auth.app.security.ServiceTokenSessionRegistry serviceSessions;
+
+    @Value("${auth.oidc.issuer:http://localhost:8082/api}")
+    private String issuer;
 
     /**
      * 签发 OIDC access token（按应用，roles claim 只含该应用的角色标签）。
@@ -56,7 +62,7 @@ public class OidcTokenService {
     public String issueAccessToken(String clientId, Long userId, String username, String realName,
                                    String employeeNo, Long orgId, Long tenantId, List<String> roles,
                                    String scope, long validity) {
-        return sign(clientId, userId, tenantId, validity, Map.of(
+        String token = sign(clientId, userId, tenantId, validity, Map.of(
                 CLAIM_TOKEN_USE, "access",
                 "username", username,
                 "name", realName,
@@ -64,6 +70,8 @@ public class OidcTokenService {
                 "org_id", orgId == null ? 0 : orgId,
                 "scope", scope == null ? "openid profile" : scope,
                 "roles", roles));
+        sessions.registerAppSession(userId, clientId, token, validity);
+        return token;
     }
 
     /**
@@ -85,10 +93,12 @@ public class OidcTokenService {
     /**
      * 签发服务间令牌（client_credentials 模式）：token_use=service，scope=service。
      */
-    public String issueServiceToken(String clientId, long validity) {
-        return sign(clientId, null, null, validity, Map.of(
+    public String issueServiceToken(String clientId, Long tenantId, long validity) {
+        String token = sign(clientId, null, tenantId, validity, Map.of(
                 CLAIM_TOKEN_USE, "service",
                 "scope", "service"));
+        serviceSessions.register(tenantId, clientId, token, validity);
+        return token;
     }
 
     /**
@@ -103,7 +113,12 @@ public class OidcTokenService {
             key = tokenKeyService.activeKey();
         }
         PublicKey publicKey = tokenKeyService.parsePublicKey(key.getPublicKey());
-        return Jwts.parser().verifyWith(publicKey).build().parseSignedClaims(token).getPayload();
+        return Jwts.parser()
+                .requireIssuer(issuer)
+                .verifyWith(publicKey)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
     }
 
     /** 手工解码头段取 kid（不验签，kid 仅用于选公钥，真实验签在 parse 内完成） */
@@ -140,8 +155,17 @@ public class OidcTokenService {
                 "kid", key.getKid(),
                 "use", "sig",
                 "alg", "RS256",
-                "n", urlEncoder.encodeToString(rsa.getModulus().toByteArray()),
-                "e", urlEncoder.encodeToString(rsa.getPublicExponent().toByteArray())));
+                "n", urlEncoder.encodeToString(unsignedBytes(rsa.getModulus())),
+                "e", urlEncoder.encodeToString(unsignedBytes(rsa.getPublicExponent()))));
+    }
+
+    /** JWK 的整数按 RFC 7518 使用无符号大端表示，移除 BigInteger 的符号填充字节。 */
+    private byte[] unsignedBytes(java.math.BigInteger value) {
+        byte[] bytes = value.toByteArray();
+        if (bytes.length > 1 && bytes[0] == 0) {
+            return java.util.Arrays.copyOfRange(bytes, 1, bytes.length);
+        }
+        return bytes;
     }
 
     /** RS256 签名（统一 kid/iss/sub/exp/iat/jti） */
@@ -153,6 +177,7 @@ public class OidcTokenService {
         var builder = Jwts.builder()
                 .header().keyId(key.getKid()).and()
                 .id(UUID.randomUUID().toString())
+                .issuer(issuer)
                 .issuedAt(now)
                 .expiration(new Date(now.getTime() + validitySeconds * 1000));
         if (sub != null) {

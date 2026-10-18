@@ -11,13 +11,13 @@
     -->
     <parent>
         <groupId>com.auth</groupId>
-        <artifactId>auth-backend</artifactId>
+        <artifactId>saasguard-iam-parent</artifactId>
         <version>1.0.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>auth-bootstrap</artifactId>
-    <name>auth-bootstrap</name>
-    <description>启动聚合模块：Spring Boot 启动类 + 全局配置</description>
+    <artifactId>saasguard-iam-server</artifactId>
+    <name>SaaSGuard IAM Server</name>
+    <description>SaaSGuard IAM 可执行服务与全局配置</description>
 
     <dependencies>
         <!-- 聚合全部业务模块 -->

@@ -11,16 +11,15 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * 多租户插件配置（预留租户模型）。
+ * SaaS 多租户数据隔离配置。
  * <p>
  * {@code TenantLineInnerInterceptor} 对所有 SQL（含 XML 手写 SQL）自动追加
  * {@code WHERE tenant_id = 当前租户}、INSERT 自动补租户列 —— 业务代码零侵入。
- * 本期只有默认租户 1000，机制就位后未来放开多租户无需改业务代码。
  * <p>
  * 共享表白名单（不追加租户条件，全租户可见）：
  * <ul>
- *   <li>平台级 RBAC（sys_role / sys_user_role / sys_menu）：超级管理员/审计员是平台概念；</li>
- *   <li>应用注册表（oauth_client 及角色声明）：应用是平台登记的门，租户只影响"谁进哪扇门"（分配表隔离）；</li>
+ *   <li>租户目录（iam_tenant）：平台级资源；</li>
+ *   <li>平台管理 RBAC 目录（sys_role / sys_menu）：角色定义与菜单目录共享；</li>
  *   <li>令牌签发密钥表（token_key）：全平台统一 JWKS；</li>
  *   <li>Flyway 历史表（防手滑误伤）。</li>
  * </ul>
@@ -34,10 +33,9 @@ public class TenantConfig {
      * 新增表时判定原则：描述"平台自身/全局资源"的进白名单，描述"租户的人和授权"的隔离。
      */
     public static final Set<String> TENANT_SHARED_TABLES = Set.of(
-            // 平台级 RBAC（认证中心自身的管理权限，超管/审计员为平台概念）
-            "sys_role", "sys_user_role", "sys_menu",
-            // 应用注册与角色声明（平台登记的"门"）
-            "app_client", "app_client_role",
+            // SaaS 平台目录与平台管理 RBAC
+            "iam_tenant",
+            "sys_role", "sys_menu",
             // 令牌签名密钥（全平台统一 JWKS）
             "token_key",
             // Flyway 历史表

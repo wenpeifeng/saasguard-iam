@@ -1,23 +1,20 @@
 import { useState } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { Button, Checkbox, Form, Input } from 'antd'
-import { UserOutlined, LockOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
+import { LockOutlined, SafetyCertificateOutlined, UserOutlined } from '@ant-design/icons'
+import AuthShell from '@/components/AuthShell'
 import { login } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 
 interface LoginForm {
+  tenantCode: string
   username: string
   password: string
 }
 
-/** 记住账号的 localStorage key */
-const REMEMBER_KEY = 'auth-center-login-username'
+const REMEMBER_KEY = 'saasguard-login-username'
 
-/**
- * 管理端登录页 —— 深色科技感分屏布局：
- * 左侧仅保留品牌标识（Logo + 标题 + 一行副标题），右侧玻璃拟态登录卡。
- * 窄屏（<768px）自动隐藏品牌区。OIDC 统一登录/授权页复用同一视觉语言。
- */
+/** 管理端登录页。 */
 export default function Login() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -37,6 +34,9 @@ export default function Login() {
         localStorage.removeItem(REMEMBER_KEY)
       }
       setAuth(resp.token, {
+        tenantId: resp.tenantId,
+        tenantCode: resp.tenantCode,
+        tenantName: resp.tenantName,
         userId: resp.userId,
         username: resp.username,
         realName: resp.realName,
@@ -45,168 +45,86 @@ export default function Login() {
       const from = (location.state as { from?: string } | null)?.from
       navigate(from ?? '/', { replace: true })
     } catch {
-      // 错误提示由 axios 拦截器统一弹出
+      // 错误提示由 axios 拦截器统一处理
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div style={{ display: 'flex', height: '100vh', background: '#0b1526' }}>
-      {/* 品牌区（窄屏隐藏）：只留标识，不堆文案 */}
-      <div
-        className="hidden md:flex"
-        style={{
-          width: '42%',
-          position: 'relative',
-          overflow: 'hidden',
-          background: 'linear-gradient(150deg, #0b1526 0%, #122650 45%, #1d3a8f 100%)',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        {/* 网格背景 */}
-        <div
-          className="login-grid"
-          style={{
-            position: 'absolute',
-            inset: 0,
-            backgroundImage:
-              'linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)',
-            backgroundSize: '60px 60px',
-            maskImage: 'radial-gradient(ellipse at 50% 45%, #000 30%, transparent 75%)',
-            WebkitMaskImage: 'radial-gradient(ellipse at 50% 45%, #000 30%, transparent 75%)',
-          }}
-        />
-        {/* 漂浮光斑 */}
-        <div
-          className="login-orb"
-          style={{
-            position: 'absolute',
-            width: 420, height: 420, left: -140, top: '18%', borderRadius: '50%',
-            background: 'radial-gradient(circle, rgba(59,130,246,0.26) 0%, transparent 65%)',
-          }}
-        />
-        <div
-          className="login-orb"
-          style={{
-            position: 'absolute',
-            width: 360, height: 360, right: -110, bottom: '12%', borderRadius: '50%',
-            background: 'radial-gradient(circle, rgba(34,211,238,0.16) 0%, transparent 65%)',
-            animationDelay: '-6s',
-          }}
-        />
-
-        <div style={{ position: 'relative', textAlign: 'center' }}>
-          <div
-            className="brand-glow"
-            style={{
-              width: 84, height: 84, borderRadius: 22,
-              background: 'linear-gradient(135deg, #3b82f6, #22d3ee)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 42, color: '#fff', margin: '0 auto 28px',
-            }}
-          >
-            <SafetyCertificateOutlined />
-          </div>
-          <div style={{ color: '#fff', fontSize: 30, fontWeight: 700, letterSpacing: 2 }}>
-            统一认证中心
-          </div>
-          <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 13, letterSpacing: 4, marginTop: 12 }}>
-            IDENTITY · ACCESS · AUDIT
-          </div>
+    <AuthShell>
+      <div className="auth-form-wrap auth-card-enter">
+        <div className="auth-mobile-brand">
+          <span><SafetyCertificateOutlined /></span>
+          SaaSGuard IAM
         </div>
-      </div>
+        <div className="auth-form-kicker">管理控制台</div>
+        <h2 className="auth-form-title">进入身份控制台</h2>
+        <p className="auth-form-description">选择租户后使用统一主账号登录，管理身份、应用访问与审计。</p>
 
-      {/* 登录区 */}
-      <div
-        style={{
-          flex: 1,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'radial-gradient(ellipse at 70% 20%, #16294f 0%, #0b1526 60%)',
-        }}
-      >
-        <div
-          className="login-card-enter"
-          style={{
-            width: 400,
-            padding: '44px 40px 36px',
-            borderRadius: 20,
-            background: 'rgba(255,255,255,0.06)',
-            border: '1px solid rgba(255,255,255,0.12)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
-            boxShadow: '0 24px 64px rgba(0,0,0,0.4)',
-          }}
+        <Form<LoginForm>
+          form={form}
+          layout="vertical"
+          requiredMark={false}
+          initialValues={{ tenantCode: 'demo', username: localStorage.getItem(REMEMBER_KEY) ?? '' }}
+          onFinish={onFinish}
+          className="auth-form"
         >
-          <h2 style={{ color: '#fff', margin: '0 0 4px', fontSize: 22 }}>管理端登录</h2>
-          <p style={{ color: 'rgba(255,255,255,0.72)', margin: '0 0 28px', fontSize: 13 }}>
-            使用主账号（登录名或工号）登录
-          </p>
-          <Form<LoginForm>
-            form={form}
-            layout="vertical"
-            initialValues={{ username: localStorage.getItem(REMEMBER_KEY) ?? '' }}
-            onFinish={onFinish}
+          <Form.Item
+            name="tenantCode"
+            label="租户代码"
+            rules={[{ required: true, message: '请输入租户代码' }]}
           >
-            <Form.Item
-              name="username"
-              rules={[{ required: true, message: '请输入用户名或工号' }]}
-            >
-              <Input
-                prefix={<UserOutlined style={{ color: 'rgba(255,255,255,0.55)' }} />}
-                placeholder="用户名 / 工号"
-                size="large"
-                style={glassInput}
-              />
-            </Form.Item>
-            <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
-              <Input.Password
-                prefix={<LockOutlined style={{ color: 'rgba(255,255,255,0.55)' }} />}
-                placeholder="密码"
-                size="large"
-                style={glassInput}
-              />
-            </Form.Item>
-            <Form.Item style={{ marginBottom: 14 }}>
-              <Checkbox
-                checked={remember}
-                onChange={(e) => setRemember(e.target.checked)}
-                style={{ color: 'rgba(255,255,255,0.72)' }}
-              >
-                记住账号
-              </Checkbox>
-            </Form.Item>
-            <Button
-              type="primary"
-              htmlType="submit"
+            <Input
+              prefix={<SafetyCertificateOutlined />}
+              placeholder="例如 demo"
               size="large"
-              block
-              loading={loading}
-              style={{
-                height: 46,
-                borderRadius: 10,
-                fontWeight: 600,
-                background: 'linear-gradient(90deg, #3b82f6, #2563eb)',
-                boxShadow: '0 8px 24px rgba(37,99,235,0.4)',
-                border: 'none',
-              }}
-            >
-              登 录
-            </Button>
-          </Form>
+              autoComplete="organization"
+            />
+          </Form.Item>
+          <Form.Item
+            name="username"
+            label="账号"
+            rules={[{ required: true, message: '请输入登录名或工号' }]}
+          >
+            <Input
+              prefix={<UserOutlined />}
+              placeholder="请输入登录名或工号"
+              size="large"
+              autoComplete="username"
+              autoFocus
+            />
+          </Form.Item>
+          <Form.Item
+            name="password"
+            label="密码"
+            rules={[{ required: true, message: '请输入密码' }]}
+          >
+            <Input.Password
+              prefix={<LockOutlined />}
+              placeholder="请输入密码"
+              size="large"
+              autoComplete="current-password"
+            />
+          </Form.Item>
+
+          <div className="auth-form-options">
+            <Checkbox checked={remember} onChange={(e) => setRemember(e.target.checked)}>
+              记住账号
+            </Checkbox>
+            <span>登录问题请联系系统管理员</span>
+          </div>
+
+          <Button type="primary" htmlType="submit" size="large" block loading={loading}>
+            登录
+          </Button>
+        </Form>
+
+        <div className="auth-security-note">
+          <SafetyCertificateOutlined />
+          <span>仅限授权用户使用，登录行为将记录到安全审计日志。</span>
         </div>
       </div>
-    </div>
+    </AuthShell>
   )
-}
-
-/** 深色玻璃输入框样式 */
-const glassInput: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.08)',
-  borderColor: 'rgba(255,255,255,0.16)',
-  borderRadius: 10,
-  color: '#fff',
 }

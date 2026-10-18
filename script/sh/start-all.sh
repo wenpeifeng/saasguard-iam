@@ -1,5 +1,5 @@
 #!/bin/bash
-# sf-auth 统一认证中心一键启动脚本
+# SaaSGuard IAM 一键启动脚本
 # 流程：环境检查 -> 基础设施(容器已在跑则跳过) -> 后端(编译+后台启动) -> 前端(dev server)
 # 注意：后端必须在仓库根目录启动（Flyway 迁移脚本在 script/sql/migration）。
 # 用法：./script/sh/start-all.sh  [--backend-only | --web-only]
@@ -60,7 +60,7 @@ if [ "${MODE}" != "web" ]; then
     fi
 
     log "启动后端 (8082)..."
-    JAR=$(ls auth-backend/auth-bootstrap/target/auth-bootstrap-*.jar | head -1)
+    JAR=$(ls auth-backend/auth-bootstrap/target/saasguard-iam-server-*.jar | head -1)
     # 必须在仓库根目录启动（Flyway 脚本在 script/sql/migration）
     nohup java -jar "${JAR}" \
         --spring.profiles.active=dev \

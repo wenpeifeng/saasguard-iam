@@ -4,7 +4,9 @@ import cn.hutool.json.JSONUtil;
 import com.auth.common.exception.BusinessException;
 import com.auth.common.result.PageResult;
 import com.auth.framework.mybatis.PageUtils;
+import com.auth.framework.context.TenantContextHolder;
 import com.auth.idm.dto.ResetPwdForm;
+import com.auth.idm.dto.BasicProfileForm;
 import com.auth.idm.dto.TransferForm;
 import com.auth.idm.dto.UserForm;
 import com.auth.idm.dto.UserQuery;
@@ -12,6 +14,7 @@ import com.auth.idm.dto.UserVO;
 import com.auth.idm.entity.IdmOrg;
 import com.auth.idm.entity.IdmUser;
 import com.auth.idm.entity.IdmUserEvent;
+import com.auth.idm.event.IdentitySyncRequestedEvent;
 import com.auth.idm.mapper.IdmOrgMapper;
 import com.auth.idm.mapper.IdmUserEventMapper;
 import com.auth.idm.mapper.IdmUserMapper;
@@ -20,6 +23,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,6 +53,9 @@ public class IdmUserServiceImpl implements IdmUserService {
     private final IdmOrgMapper orgMapper;
     private final PasswordEncoder passwordEncoder;
     private final com.auth.system.security.JwtTokenProvider tokenProvider;
+    private final com.auth.idm.service.NumberService numberService;
+    private final ApplicationEventPublisher eventPublisher;
+    private final com.auth.system.service.TenantService tenantService;
 
     @Override
     public PageResult<UserVO> page(UserQuery query) {
@@ -74,17 +81,26 @@ public class IdmUserServiceImpl implements IdmUserService {
     }
 
     @Override
+    public List<com.auth.idm.dto.UserEventVO> events(Long id) {
+        requireUser(id);
+        return eventMapper.selectList(new LambdaQueryWrapper<IdmUserEvent>()
+                .eq(IdmUserEvent::getUserId, id).orderByDesc(IdmUserEvent::getId).last("LIMIT 100"))
+                .stream().map(event -> new com.auth.idm.dto.UserEventVO(event.getId(), event.getEventType(), event.getDetail(), event.getCreateTime())).toList();
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public Long create(UserForm form) {
-        if (userMapper.selectCount(new LambdaQueryWrapper<IdmUser>()
-                .eq(IdmUser::getEmployeeNo, form.getEmployeeNo())) > 0) {
-            throw new BusinessException("工号已存在：%s", form.getEmployeeNo());
+        var tenant = tenantService.requireActive(TenantContextHolder.getTenantId());
+        if (tenant.getMaxUsers() != null && tenant.getMaxUsers() > 0
+                && userMapper.selectCount(new LambdaQueryWrapper<IdmUser>()) >= tenant.getMaxUsers()) {
+            throw new BusinessException("当前租户用户数已达到套餐上限：%s", tenant.getMaxUsers());
         }
         requireActiveOrg(form.getOrgId());
         IdmUser user = new IdmUser();
-        user.setEmployeeNo(form.getEmployeeNo());
+        user.setEmployeeNo(numberService.next("EMP"));
         // 登录名默认同工号（预留：后续可放开独立登录名）
-        user.setUsername(form.getEmployeeNo());
+        user.setUsername(user.getEmployeeNo());
         user.setRealName(form.getRealName());
         user.setOrgId(form.getOrgId());
         user.setPosition(form.getPosition());
@@ -104,6 +120,29 @@ public class IdmUserServiceImpl implements IdmUserService {
     @Transactional(rollbackFor = Exception.class)
     public void update(Long id, UserForm form) {
         IdmUser user = requireUser(id);
+        requireMutable(user);
+        requireNotLeft(user);
+        if (form.getEmployeeNo() != null && !form.getEmployeeNo().equals(user.getEmployeeNo())) {
+            throw new BusinessException("工号创建后不可修改");
+        }
+        if (!form.getOrgId().equals(user.getOrgId())) throw new BusinessException("变更组织请使用转岗操作");
+        IdmUser patch = new IdmUser();
+        patch.setId(id);
+        patch.setRealName(form.getRealName());
+        patch.setPosition(form.getPosition());
+        patch.setEmail(form.getEmail());
+        patch.setPhone(form.getPhone());
+        patch.setEntryDate(form.getEntryDate());
+        userMapper.updateById(patch);
+        recordEvent(id, "UPDATE", null);
+        requestAllAppSync("USER_UPDATED");
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateBasicProfile(Long id, BasicProfileForm form) {
+        IdmUser user = requireUser(id);
+        requireMutable(user);
         requireNotLeft(user);
         IdmUser patch = new IdmUser();
         patch.setId(id);
@@ -112,12 +151,15 @@ public class IdmUserServiceImpl implements IdmUserService {
         patch.setEmail(form.getEmail());
         patch.setPhone(form.getPhone());
         userMapper.updateById(patch);
+        recordEvent(id, "UPDATE_PROFILE", null);
+        requestAllAppSync("PROFILE_UPDATED");
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void transfer(Long id, TransferForm form) {
         IdmUser user = requireUser(id);
+        requireMutable(user);
         requireNotLeft(user);
         requireActiveUser(user);
         if (form.getTargetOrgId().equals(user.getOrgId())) {
@@ -132,13 +174,19 @@ public class IdmUserServiceImpl implements IdmUserService {
         recordEvent(id, IdmUserEvent.TYPE_TRANSFER, JSONUtil.createObj()
                 .set("fromOrgId", before)
                 .set("toOrgId", form.getTargetOrgId())
+                .set("fromOrgName", orgMapper.selectById(before).getName())
+                .set("toOrgName", orgMapper.selectById(form.getTargetOrgId()).getName())
                 .set("reason", form.getReason()).toString());
+        tokenProvider.invalidateAllUserSessions(id);
+        requestAllAppSync("USER_TRANSFERRED");
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void leave(Long id) {
+        requireNotSelf(id);
         IdmUser user = requireUser(id);
+        requireMutable(user);
         if (user.getStatus() == IdmUser.STATUS_LEFT) {
             throw new BusinessException("用户已是离职状态（离职为终态，不可重复操作）");
         }
@@ -153,12 +201,15 @@ public class IdmUserServiceImpl implements IdmUserService {
         if (killed > 0) {
             log.info("[离职下线] userId={} 删除在线会话 {} 个", id, killed);
         }
+        requestAllAppSync("USER_LEFT");
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void changeStatus(Long id, Integer status) {
+        if (status == IdmUser.STATUS_SUSPENDED) requireNotSelf(id);
         IdmUser user = requireUser(id);
+        requireMutable(user);
         if (user.getStatus() == IdmUser.STATUS_LEFT) {
             throw new BusinessException("用户已离职，离职是终态，不可变更状态");
         }
@@ -178,23 +229,38 @@ public class IdmUserServiceImpl implements IdmUserService {
         if (status == IdmUser.STATUS_SUSPENDED) {
             tokenProvider.invalidateAllUserSessions(id);
         }
+        requestAllAppSync("GLOBAL_STATUS_CHANGED");
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void resetPassword(Long id, ResetPwdForm form) {
         IdmUser user = requireUser(id);
+        requireMutable(user);
         requireNotLeft(user);
         IdmUser patch = new IdmUser();
         patch.setId(id);
         patch.setPassword(passwordEncoder.encode(form.getPassword()));
         userMapper.updateById(patch);
         recordEvent(id, IdmUserEvent.TYPE_RESET_PWD, null);
+        tokenProvider.invalidateAllUserSessions(id);
+        requestAllAppSync("PASSWORD_RESET");
+    }
+
+    private void requestAllAppSync(String reason) {
+        eventPublisher.publishEvent(IdentitySyncRequestedEvent.all(
+                com.auth.framework.security.SecurityUtils.getCurrentClientId(), reason));
+    }
+
+    private void requireNotSelf(Long id) {
+        if (id.equals(com.auth.framework.security.SecurityUtils.getCurrentUserId())) {
+            throw new BusinessException("不能停用或离职当前登录账号，请由其他管理员办理");
+        }
     }
 
     /** 加载用户，不存在即抛业务异常 */
     private IdmUser requireUser(Long id) {
-        IdmUser user = userMapper.selectById(id);
+        IdmUser user = userMapper.selectOne(new LambdaQueryWrapper<IdmUser>().eq(IdmUser::getId, id).last("FOR UPDATE"));
         if (user == null) {
             throw new BusinessException("用户不存在");
         }
@@ -208,6 +274,13 @@ public class IdmUserServiceImpl implements IdmUserService {
         }
     }
 
+    /** 系统种子主档随项目交付，禁止生命周期写操作，避免演示入口被误改坏。 */
+    private void requireMutable(IdmUser user) {
+        if (Boolean.TRUE.equals(user.getImmutable())) {
+            throw new BusinessException("系统种子账号为只读主档，不允许修改；可单独调整应用分配和子系统业务角色");
+        }
+    }
+
     /** 仅在职用户可操作（全局停用状态需先恢复） */
     private void requireActiveUser(IdmUser user) {
         if (user.getStatus() != IdmUser.STATUS_ACTIVE) {
@@ -217,12 +290,16 @@ public class IdmUserServiceImpl implements IdmUserService {
 
     /** 组织存在且启用 */
     private void requireActiveOrg(Long orgId) {
-        IdmOrg org = orgMapper.selectById(orgId);
-        if (org == null) {
-            throw new BusinessException("组织不存在");
+        if (orgId == null || orgId <= 0L) {
+            throw new BusinessException("请选择有效组织");
         }
-        if (org.getStatus() == 0) {
-            throw new BusinessException("组织已停用：%s", org.getName());
+        java.util.Set<Long> visited = new java.util.HashSet<>();
+        while (orgId != 0L) {
+            if (!visited.add(orgId)) throw new BusinessException("组织层级存在循环，请先修复组织架构");
+            IdmOrg org = orgMapper.selectOne(new LambdaQueryWrapper<IdmOrg>().eq(IdmOrg::getId, orgId).last("FOR UPDATE"));
+            if (org == null) throw new BusinessException("组织不存在");
+            if (org.getStatus() == 0) throw new BusinessException("组织或上级组织已停用：%s", org.getName());
+            orgId = org.getParentId();
         }
     }
 
@@ -252,6 +329,8 @@ public class IdmUserServiceImpl implements IdmUserService {
             vo.setEntryDate(user.getEntryDate());
             vo.setLeaveDate(user.getLeaveDate());
             vo.setCreateTime(user.getCreateTime());
+            vo.setAccountSource(user.getAccountSource());
+            vo.setImmutable(Boolean.TRUE.equals(user.getImmutable()));
             return vo;
         };
     }

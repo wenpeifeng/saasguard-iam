@@ -64,4 +64,10 @@ public class IdmUser extends BaseEntity {
 
     /** 离职日期（离职时写入） */
     private LocalDate leaveDate;
+
+    /** 账号来源：MANUAL=人工建号，SEED=随项目初始化的稳定种子 */
+    private String accountSource;
+
+    /** 主档是否只读；种子账号为 true，授权关系仍可独立维护 */
+    private Boolean immutable;
 }

@@ -2,6 +2,7 @@ package com.auth.app.dto;
 
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -21,6 +22,21 @@ public class SyncUserVO {
     private String realName;
     private String orgName;
     private String position;
+    private String email;
+    private String phone;
+
+    /** 身份来源：MANUAL / SEED。 */
+    private String accountSource;
+
+    /** 系统种子主档是否只读。 */
+    private Boolean immutable;
+
+    /** 全局人员状态：1在职 2离职 3全局停用。 */
+    private Integer identityStatus;
+
+    private LocalDate entryDate;
+    private LocalDate leaveDate;
+    private LocalDateTime identityCreateTime;
 
     /** 是否可登录本应用（全局在职 且 应用级启用） */
     private Boolean active;

@@ -2,6 +2,7 @@ package com.auth.idm.service;
 
 import com.auth.common.result.PageResult;
 import com.auth.idm.dto.ResetPwdForm;
+import com.auth.idm.dto.BasicProfileForm;
 import com.auth.idm.dto.TransferForm;
 import com.auth.idm.dto.UserForm;
 import com.auth.idm.dto.UserQuery;
@@ -35,6 +36,9 @@ public interface IdmUserService {
      */
     UserVO get(Long id);
 
+    /** 最近 100 条员工生命周期变更，用于管理端追溯。 */
+    java.util.List<com.auth.idm.dto.UserEventVO> events(Long id);
+
     /**
      * 入职建号。
      *
@@ -51,6 +55,9 @@ public interface IdmUserService {
      * @param form 建号表单（employeeNo 被忽略）
      */
     void update(Long id, UserForm form);
+
+    /** 修改不涉及组织与生命周期的员工基础档案。 */
+    void updateBasicProfile(Long id, BasicProfileForm form);
 
     /**
      * 转岗：修改组织并写事件流水。

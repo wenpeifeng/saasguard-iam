@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Input, Select, Space, Tag } from 'antd'
+import { Input, Select, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { SearchOutlined } from '@ant-design/icons'
 import PageHeader from '@/components/PageHeader'
 import PageTable from '@/components/PageTable'
+import FilterBar from '@/components/FilterBar'
 import { useDebounce } from '@/hooks/useDebounce'
 import { type LoginLog } from '@/api/app'
 
@@ -40,23 +41,23 @@ export default function LoginLogList() {
       <PageTable<LoginLog>
         title="登录日志"
         url="/audit/login-logs"
-        queryKey={['audit', 'login-logs', debounced, loginType, success]}
+        queryKey={['audit', 'login-logs']}
         params={{ username: debounced || undefined, loginType, success }}
         columns={columns}
         toolbar={
-          <Space wrap>
+          <FilterBar>
             <Input
               allowClear
               prefix={<SearchOutlined />}
               placeholder="账号"
-              style={{ width: 160 }}
+              className="filter-field filter-field--medium"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
             />
             <Select
               allowClear
               placeholder="登录类型"
-              style={{ width: 120 }}
+              className="filter-field filter-field--small"
               value={loginType}
               onChange={setLoginType}
               options={[
@@ -67,7 +68,7 @@ export default function LoginLogList() {
             <Select
               allowClear
               placeholder="结果"
-              style={{ width: 100 }}
+              className="filter-field filter-field--small"
               value={success}
               onChange={setSuccess}
               options={[
@@ -75,7 +76,7 @@ export default function LoginLogList() {
                 { value: 0, label: '失败' },
               ]}
             />
-          </Space>
+          </FilterBar>
         }
       />
     </div>

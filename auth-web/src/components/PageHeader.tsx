@@ -19,25 +19,14 @@ interface PageHeaderProps {
  */
 export default function PageHeader({ title, subtitle, extra }: PageHeaderProps) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 16,
-      }}
-    >
-      <div>
-        <Title level={4} style={{ margin: 0 }}>
+    <div className="page-header">
+      <div className="page-header-copy">
+        <Title level={3} className="page-title">
           {title}
         </Title>
-        {subtitle && (
-          <span style={{ color: '#8c939c', fontSize: 13, marginTop: 4, display: 'inline-block' }}>
-            {subtitle}
-          </span>
-        )}
+        {subtitle && <p className="page-subtitle">{subtitle}</p>}
       </div>
-      {extra && <div style={{ display: 'flex', gap: 8 }}>{extra}</div>}
+      {extra && <div className="page-actions">{extra}</div>}
     </div>
   )
 }

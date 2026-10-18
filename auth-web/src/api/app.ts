@@ -46,6 +46,17 @@ export function pageApps(params: { pageNum: number; pageSize: number }) {
   return get<PageResult<AppClientVO>>('/apps', params)
 }
 
+/** 小体量应用目录全量读取，用于用户授权选择。 */
+export async function fetchAllApps() {
+  const result: AppClientVO[] = []
+  let pageNum = 1
+  while (true) {
+    const page = await pageApps({ pageNum: pageNum++, pageSize: 100 })
+    result.push(...page.records)
+    if (!page.records.length || result.length >= page.total) return result
+  }
+}
+
 export function getApp(clientId: string) {
   return get<AppClientVO>(`/apps/${clientId}`)
 }
@@ -163,6 +174,7 @@ export function pageOpLogs(params: {
 
 export interface AuthorizeParams {
   clientId: string
+  tenantCode: string
   redirectUri: string
   responseType: string
   scope?: string

@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Card, Table } from 'antd'
+import { useEffect, useState, type ReactNode } from 'react'
+import { hashKey, useQuery } from '@tanstack/react-query'
+import { Alert, Button, Card, Table } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { get, type PageResult } from '@/api/request'
 
@@ -58,23 +58,38 @@ export default function PageTable<T extends { id?: number | string }>({
   const [pageSize, setPageSize] = useState(10)
 
   const queryParams: PageQuery = { ...params, pageNum, pageSize }
+  const filterKey = hashKey([...queryKey, params])
 
-  const { data, isLoading, isFetching } = useQuery({
-    queryKey: [...queryKey, pageNum, pageSize],
+  useEffect(() => {
+    setPageNum(1)
+  }, [filterKey])
+
+  const { data, isLoading, isFetching, isError, refetch } = useQuery({
+    queryKey: [...queryKey, params, pageNum, pageSize],
     queryFn: () => get<PageResult<T>>(url, queryParams),
     placeholderData: (prev) => prev, // 翻页时保留旧数据，避免闪空
   })
 
   return (
-    <Card title={title}>
-      {toolbar && (
-        <div style={{ marginBottom: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>{toolbar}</div>
+    <Card title={title} className="page-table-card">
+      {toolbar && <div className="page-table-toolbar">{toolbar}</div>}
+      {isError && (
+        <Alert
+          type="error"
+          showIcon
+          className="page-table-error"
+          message="数据加载失败"
+          description="请检查网络连接后重试。"
+          action={<Button size="small" onClick={() => void refetch()}>重新加载</Button>}
+        />
       )}
       <Table<T>
-        rowKey={rowKey as string}
+        rowKey={rowKey}
         columns={columns}
         dataSource={data?.records ?? []}
         loading={isLoading || isFetching}
+        locale={{ emptyText: isError ? '暂时无法加载数据' : '暂无数据' }}
+        scroll={{ x: 'max-content' }}
         pagination={{
           total: data?.total ?? 0,
           current: pageNum,

@@ -3,9 +3,8 @@ package com.auth.framework.context;
 /**
  * 租户上下文（ThreadLocal）—— 多租户隔离维度的请求级载体。
  * <p>
- * 本期为"预留租户"模型：登录流程不暴露租户概念，所有请求落在默认租户 1000（与 ERP 对齐），
- * 但表结构/唯一索引/插件机制完整具备租户维度，后续子公司或外部企业接入时
- * 只需在登录环节识别租户并写入本上下文即可，无需迁移存量数据。
+ * SaaS 租户由登录租户代码、JWT tenantId claim 或平台超管显式切换确定。
+ * 未建立上下文的引导/兼容场景仍落在演示租户 1000，但任何业务请求都应尽早显式写入。
  * <p>
  * 写入方：auth-platform-system 的 JwtAuthFilter（从 JWT claims 加载），
  * 请求结束（filter finally）调用 {@link #clear()} 清理，防止线程复用串上下文。
@@ -16,7 +15,7 @@ package com.auth.framework.context;
  */
 public final class TenantContextHolder {
 
-    /** 默认租户 ID（本期唯一租户，与各表 tenant_id 列 DEFAULT 一致） */
+    /** 默认演示租户 ID（兼容既有初始化数据） */
     public static final long DEFAULT_TENANT_ID = 1000L;
 
     /** 租户上下文快照：tenantId 来自令牌 */
@@ -47,5 +46,40 @@ public final class TenantContextHolder {
     public static Long getTenantId() {
         TenantContext ctx = HOLDER.get();
         return ctx != null && ctx.tenantId() != null ? ctx.tenantId() : DEFAULT_TENANT_ID;
+    }
+
+    /**
+     * 在指定租户上下文内执行任务，并在结束后恢复调用前上下文。
+     *
+     * @param tenantId 租户 ID
+     * @param action   任务
+     * @param <T>      返回类型
+     * @return 任务结果
+     */
+    public static <T> T callWithTenant(Long tenantId, java.util.function.Supplier<T> action) {
+        TenantContext previous = HOLDER.get();
+        try {
+            set(new TenantContext(tenantId));
+            return action.get();
+        } finally {
+            if (previous == null) {
+                clear();
+            } else {
+                set(previous);
+            }
+        }
+    }
+
+    /**
+     * 在指定租户上下文内执行无返回任务，并在结束后恢复调用前上下文。
+     *
+     * @param tenantId 租户 ID
+     * @param action   任务
+     */
+    public static void runWithTenant(Long tenantId, Runnable action) {
+        callWithTenant(tenantId, () -> {
+            action.run();
+            return null;
+        });
     }
 }

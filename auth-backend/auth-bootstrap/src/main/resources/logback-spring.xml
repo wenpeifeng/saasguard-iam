@@ -18,7 +18,7 @@
     <!-- Spring Boot 默认转换规则：%clr 彩色、%wEx 精简堆栈；以及 Tomcat/Hibernate 等第三方噪音级别 -->
     <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
 
-    <springProperty scope="context" name="APP_NAME" source="spring.application.name" defaultValue="auth-backend"/>
+    <springProperty scope="context" name="APP_NAME" source="spring.application.name" defaultValue="saasguard-iam"/>
     <!-- LOG_PATH 由 application.yml 的 logging.file.path 注入；未配置时回退 logs（相对启动目录） -->
     <property name="LOG_PATH" value="${LOG_PATH:-logs}"/>
     <property name="LOG_FILE_BASE" value="${LOG_PATH}/${APP_NAME}"/>

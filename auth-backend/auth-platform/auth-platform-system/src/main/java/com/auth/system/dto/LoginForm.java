@@ -1,6 +1,7 @@
 package com.auth.system.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import lombok.Data;
 
 /**
@@ -8,6 +9,10 @@ import lombok.Data;
  */
 @Data
 public class LoginForm {
+
+    /** 租户代码；未传时使用演示租户 demo */
+    @Pattern(regexp = "^[a-z][a-z0-9-]{1,31}$", message = "租户代码格式不正确")
+    private String tenantCode;
 
     /** 登录名（工号或用户名） */
     @NotBlank(message = "用户名不能为空")

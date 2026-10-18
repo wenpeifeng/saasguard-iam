@@ -31,7 +31,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/idm/users")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('SUPER_ADMIN')")
+@PreAuthorize("hasAnyRole('SUPER_ADMIN','TENANT_ADMIN')")
 public class UserController {
 
     private final IdmUserService userService;
@@ -54,12 +54,18 @@ public class UserController {
         return Result.ok(userService.get(id));
     }
 
+    /** 查询最近 100 条生命周期变更记录。 */
+    @GetMapping("/{id}/events")
+    public Result<java.util.List<com.auth.idm.dto.UserEventVO>> events(@PathVariable Long id) {
+        return Result.ok(userService.events(id));
+    }
+
     /**
      * 入职建号。
      */
     @Operation(summary = "入职建号")
     @PostMapping
-    public Result<Long> create(@Valid @RequestBody UserForm form) {
+    public Result<Long> create(@org.springframework.validation.annotation.Validated(UserForm.Create.class) @RequestBody UserForm form) {
         return Result.ok(userService.create(form));
     }
 

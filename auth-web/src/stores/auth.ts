@@ -3,6 +3,9 @@ import { persist } from 'zustand/middleware'
 
 /** 登录用户信息（后端 /auth/login 返回的 LoginVO） */
 export interface LoginUser {
+  tenantId: number
+  tenantCode: string
+  tenantName: string
   userId: number
   username: string
   realName: string
@@ -17,8 +20,13 @@ export interface LoginUser {
 interface AuthState {
   token: string | null
   user: LoginUser | null
+  activeTenantId: number | null
+  activeTenantCode: string | null
+  activeTenantName: string | null
   /** 登录成功后写入 */
   setAuth: (token: string, user: LoginUser) => void
+  /** 平台超管切换租户数据视角 */
+  switchTenant: (tenantId: number, tenantCode: string, tenantName: string) => void
   /** 退出登录 / 401 强制登出 */
   logout: () => void
 }
@@ -28,9 +36,25 @@ export const useAuthStore = create<AuthState>()(
     (set) => ({
       token: null,
       user: null,
-      setAuth: (token, user) => set({ token, user }),
-      logout: () => set({ token: null, user: null }),
+      activeTenantId: null,
+      activeTenantCode: null,
+      activeTenantName: null,
+      setAuth: (token, user) => set({
+        token, user,
+        activeTenantId: user.tenantId,
+        activeTenantCode: user.tenantCode,
+        activeTenantName: user.tenantName,
+      }),
+      switchTenant: (tenantId, tenantCode, tenantName) => set({
+        activeTenantId: tenantId,
+        activeTenantCode: tenantCode,
+        activeTenantName: tenantName,
+      }),
+      logout: () => set({
+        token: null, user: null,
+        activeTenantId: null, activeTenantCode: null, activeTenantName: null,
+      }),
     }),
-    { name: 'auth-center' },
+    { name: 'saasguard-iam' },
   ),
 )

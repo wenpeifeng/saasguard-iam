@@ -17,8 +17,10 @@ import java.time.LocalDate;
 @Data
 public class UserForm {
 
+    /** 创建时额外校验密码，编辑档案不要求密码。 */
+    public interface Create extends jakarta.validation.groups.Default { }
+
     /** 工号（不可变，租户内唯一） */
-    @NotBlank(message = "工号不能为空")
     @Size(max = 64, message = "工号长度不能超过 64")
     private String employeeNo;
 
@@ -44,10 +46,11 @@ public class UserForm {
     private String phone;
 
     /** 初始口令（BCrypt 加密后入库） */
-    @NotBlank(message = "初始口令不能为空")
-    @Size(min = 8, max = 64, message = "口令长度须为 8-64 位")
+    @NotBlank(message = "初始密码不能为空", groups = Create.class)
+    @Size(min = 6, max = 64, message = "密码长度须为 6-64 位", groups = Create.class)
     private String password;
 
     /** 入职日期（缺省当天） */
+    @jakarta.validation.constraints.PastOrPresent(message = "入职日期不能晚于今天")
     private LocalDate entryDate;
 }

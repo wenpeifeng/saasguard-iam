@@ -42,6 +42,13 @@ import java.util.stream.Collectors;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    /** JSON 中的日期、枚举等字段不合法属于输入错误，不应返回系统异常。 */
+    @ExceptionHandler(org.springframework.http.converter.HttpMessageNotReadableException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<Void> handleUnreadableBody(org.springframework.http.converter.HttpMessageNotReadableException e) {
+        return failDetail(ErrorCode.BAD_REQUEST, MessageKeys.VALIDATION_FAILED, "请检查字段类型、组织类型及日期格式");
+    }
+
     /** @RequestBody 上的 @Valid 校验失败 */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)

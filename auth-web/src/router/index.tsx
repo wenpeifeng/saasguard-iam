@@ -3,10 +3,13 @@ import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { Spin } from 'antd'
 import { RequireAuth } from '@/router/guards'
 import AdminLayout from '@/layouts/AdminLayout'
+import Login from '@/pages/login/Login'
+import Authorize from '@/pages/oauth/Authorize'
 
-/** 懒加载页面：按需分割代码，首屏只加载布局与登录页 */
-const Login = lazy(() => import('@/pages/login/Login'))
-const Authorize = lazy(() => import('@/pages/oauth/Authorize'))
+/**
+ * 登录与 OIDC 授权页属于认证关键路径，必须同步加载。
+ * 若在用户输入期间才解析 React.lazy，会触发同步更新中的 Suspense 异常。
+ */
 
 /** 模块路由片段的统一形状 */
 interface RouteFragment {
@@ -17,7 +20,7 @@ interface RouteFragment {
 /** 懒加载路由的统一 loading 态 */
 function RouteLoading() {
   return (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
+    <div className="route-loading" role="status" aria-label="页面加载中">
       <Spin size="large" />
     </div>
   )
@@ -59,6 +62,7 @@ export const router = createBrowserRouter([
       { index: true, element: <Navigate to="/users" replace /> },
       ...toRouteChildren([
         { path: 'users', lazy: () => import('@/pages/users/UserList') },
+        { path: 'tenants', lazy: () => import('@/pages/tenants/TenantList') },
         { path: 'orgs', lazy: () => import('@/pages/orgs/OrgTree') },
         { path: 'apps', lazy: () => import('@/pages/apps/AppList') },
         { path: 'audit/login-logs', lazy: () => import('@/pages/audit/LoginLogList') },

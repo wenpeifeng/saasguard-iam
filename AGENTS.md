@@ -1,6 +1,6 @@
-# auth-center 统一认证中心开发交接文档（新会话必读）
+# SaaSGuard IAM 开发交接文档（新会话必读）
 
-本仓库是一套自研**统一认证中心（IdP/IAM）**，为集团多系统（ERP `../sf-erp`、MES `../sf-mes`、后续更多）提供统一身份认证与应用授权。设计对标 **微软 Entra ID 应用模型 + 国内 4A 平台（账号/认证/授权/审计）+ Spring Authorization Server 的 OIDC 协议语义**。由前一会话完成调研与架构定稿，现移交新会话开发。**动手前先读本文档，再通读参照系。**
+本仓库是一套自研、可扩展的 **SaaS 多租户 IAM**，产品名 **SaaSGuard IAM**，为 ERP、MES 和后续 SaaS 应用提供统一身份认证与应用授权。设计参考 Entra ID 应用模型、4A（账号/认证/授权/审计）与 OIDC/OAuth 2 协议语义。**动手前先读本文档与 `docs/SaaS多租户IAM架构.md`。**
 
 ## 参照系（结构与规范的唯一模板）
 

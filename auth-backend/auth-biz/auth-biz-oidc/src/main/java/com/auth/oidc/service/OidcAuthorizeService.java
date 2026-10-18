@@ -9,6 +9,9 @@ import com.auth.common.exception.BusinessException;
 import com.auth.idm.entity.IdmUser;
 import com.auth.idm.mapper.IdmUserMapper;
 import com.auth.system.service.AuditService;
+import com.auth.system.dto.LoginAuditCommand;
+import com.auth.framework.context.TenantContextHolder;
+import com.auth.system.service.TenantService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -43,6 +46,7 @@ public class OidcAuthorizeService {
     private final IdmUserMapper userMapper;
     private final StringRedisTemplate redis;
     private final AuditService auditService;
+    private final TenantService tenantService;
 
     /**
      * 授权请求（前端 /oauth/authorize 页面提交）。
@@ -50,6 +54,8 @@ public class OidcAuthorizeService {
     @Data
     public static class AuthorizeRequest {
         private String clientId;
+        /** SaaS 租户代码，必须与当前登录令牌的租户一致 */
+        private String tenantCode;
         private String redirectUri;
         /** 固定 code（本实现仅支持授权码模式） */
         private String responseType;
@@ -58,7 +64,7 @@ public class OidcAuthorizeService {
         private String nonce;
         /** PKCE：code_challenge（S256 推荐） */
         private String codeChallenge;
-        /** PKCE：code_challenge_method：S256 / plain */
+        /** PKCE：code_challenge_method，仅支持 S256 */
         private String codeChallengeMethod;
         /** 用户已在授权确认页点击同意（应用配置 consent_required 时必传 true） */
         private Boolean consent;
@@ -76,6 +82,7 @@ public class OidcAuthorizeService {
         private String nonce;
         private String codeChallenge;
         private String codeChallengeMethod;
+        private Long tenantId;
     }
 
     /**
@@ -96,6 +103,10 @@ public class OidcAuthorizeService {
      * @param ip     来源 IP（登录日志审计用）
      */
     public AuthorizeResult authorize(Long userId, AuthorizeRequest request, String ip) {
+        var requestedTenant = tenantService.requireActive(request.getTenantCode());
+        if (!TenantContextHolder.getTenantId().equals(requestedTenant.getId())) {
+            throw new BusinessException("当前登录账号不属于请求租户，请切换账号后重试");
+        }
         // 1. 应用存在且启用
         AppClient client = clientService.loadEnabledClient(request.getClientId());
         if (client == null) {
@@ -109,10 +120,10 @@ public class OidcAuthorizeService {
         if (!client.getRedirectUri().equals(request.getRedirectUri())) {
             throw new BusinessException("redirect_uri 与应用注册不符");
         }
-        // 4. PKCE：challenge 必填（本实现强制 PKCE），method 默认 S256
+        // 4. PKCE：challenge 必填且只允许 S256，拒绝可降级的 plain 模式
         String method = request.getCodeChallengeMethod() == null ? "S256" : request.getCodeChallengeMethod();
-        if (!"S256".equals(method) && !"plain".equals(method)) {
-            throw new BusinessException("transform 不支持的 code_challenge_method：%s", method);
+        if (!"S256".equals(method)) {
+            throw new BusinessException("仅支持 code_challenge_method=S256");
         }
         if (request.getCodeChallenge() == null || request.getCodeChallenge().isBlank()) {
             throw new BusinessException("公共客户端必须携带 code_challenge（PKCE）");
@@ -123,19 +134,16 @@ public class OidcAuthorizeService {
             throw new BusinessException("用户不存在");
         }
         if (user.getStatus() == IdmUser.STATUS_LEFT) {
-            auditService.recordLogin(user.getUsername(), userId, "OIDC", client.getClientId(),
-                    false, "账号已离职", ip, null);
+            recordLoginAudit(user, client.getClientId(), false, "账号已离职", ip);
             throw new BusinessException("账号已离职，禁止登录");
         }
         if (user.getStatus() == IdmUser.STATUS_SUSPENDED) {
-            auditService.recordLogin(user.getUsername(), userId, "OIDC", client.getClientId(),
-                    false, "账号已被全局停用", ip, null);
+            recordLoginAudit(user, client.getClientId(), false, "账号已被全局停用", ip);
             throw new BusinessException("账号已被全局停用，禁止登录");
         }
         AssignVO assign = assignService.checkLoginAccess(client.getClientId(), userId);
         if (assign == null) {
-            auditService.recordLogin(user.getUsername(), userId, "OIDC", client.getClientId(),
-                    false, "应用未分配或应用级禁用", ip, null);
+            recordLoginAudit(user, client.getClientId(), false, "应用未分配或应用级禁用", ip);
             throw new BusinessException("未分配该应用或已被应用级禁用，请联系管理员");
         }
         // 6. consent：应用要求且用户未确认 → 前端展示授权确认页
@@ -155,17 +163,17 @@ public class OidcAuthorizeService {
         payload.setNonce(request.getNonce());
         payload.setCodeChallenge(request.getCodeChallenge());
         payload.setCodeChallengeMethod(method);
+        payload.setTenantId(TenantContextHolder.getTenantId());
         String code = UUID.randomUUID().toString().replace("-", "");
         redis.opsForValue().set(CODE_PREFIX + code, JSONUtil.toJsonStr(payload),
                 Duration.ofSeconds(CODE_TTL_SECONDS));
-        auditService.recordLogin(user.getUsername(), userId, "OIDC", client.getClientId(),
-                true, null, ip, null);
+        recordLoginAudit(user, client.getClientId(), true, null, ip);
 
         StringBuilder redirect = new StringBuilder(request.getRedirectUri())
                 .append(request.getRedirectUri().contains("?") ? "&" : "?")
-                .append("code=").append(code);
+                .append("code=").append(urlEncode(code));
         if (request.getState() != null && !request.getState().isBlank()) {
-            redirect.append("&state=").append(request.getState());
+            redirect.append("&state=").append(urlEncode(request.getState()));
         }
         result.setRedirectUri(redirect.toString());
         return result;
@@ -183,17 +191,18 @@ public class OidcAuthorizeService {
         // 一次性：先删再用（并发重放防护）
         redis.delete(key);
         CodePayload payload = JSONUtil.toBean(json, CodePayload.class);
+        if (!TenantContextHolder.getTenantId().equals(payload.getTenantId())) {
+            throw new BusinessException("授权码不属于当前租户");
+        }
         if (!payload.getClientId().equals(clientId) || !payload.getRedirectUri().equals(redirectUri)) {
             throw new BusinessException("授权码与 client/redirect_uri 不匹配");
         }
-        // PKCE 校验：S256 = BASE64URL(SHA256(verifier))；plain = verifier 即 challenge
+        // PKCE 校验：S256 = BASE64URL(SHA256(verifier))
         if (payload.getCodeChallenge() != null) {
             if (codeVerifier == null || codeVerifier.isBlank()) {
                 throw new BusinessException("缺少 code_verifier（PKCE）");
             }
-            String expected = "plain".equals(payload.getCodeChallengeMethod())
-                    ? codeVerifier
-                    : s256(codeVerifier);
+            String expected = s256(codeVerifier);
             if (!expected.equals(payload.getCodeChallenge())) {
                 throw new BusinessException("PKCE 校验失败：code_verifier 不匹配");
             }
@@ -212,6 +221,10 @@ public class OidcAuthorizeService {
         }
     }
 
+    private String urlEncode(String value) {
+        return java.net.URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
     /** 应用角色标签（签发 access token 的 roles claim） */
     public List<String> rolesOf(String clientId, Long userId) {
         return userRoles(clientId, userId);
@@ -219,6 +232,21 @@ public class OidcAuthorizeService {
 
     private List<String> userRoles(String clientId, Long userId) {
         AssignVO assign = assignService.checkLoginAccess(clientId, userId);
-        return assign != null && assign.getRoles() != null ? assign.getRoles() : List.of();
+        if (assign == null) throw new BusinessException("用户已离职、停用或未获应用访问权限");
+        return assign.getRoles() != null ? assign.getRoles() : List.of();
+    }
+
+    private void recordLoginAudit(IdmUser user, String clientId, boolean success,
+                                  String failReason, String ip) {
+        auditService.recordLogin(LoginAuditCommand.builder()
+                .tenantId(TenantContextHolder.getTenantId())
+                .username(user.getUsername())
+                .userId(user.getId())
+                .loginType("OIDC")
+                .clientId(clientId)
+                .success(success)
+                .failReason(failReason)
+                .ip(ip)
+                .build());
     }
 }

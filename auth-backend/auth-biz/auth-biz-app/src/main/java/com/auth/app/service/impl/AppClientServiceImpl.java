@@ -8,6 +8,7 @@ import com.auth.app.entity.AppClient;
 import com.auth.app.entity.AppClientRole;
 import com.auth.app.mapper.AppClientMapper;
 import com.auth.app.mapper.AppClientRoleMapper;
+import com.auth.app.mapper.AppUserAssignMapper;
 import com.auth.app.mapper.AppUserRoleMapper;
 import com.auth.app.service.AppClientService;
 import com.auth.common.exception.BusinessException;
@@ -32,7 +33,10 @@ public class AppClientServiceImpl implements AppClientService {
     private final AppClientMapper clientMapper;
     private final AppClientRoleMapper roleMapper;
     private final AppUserRoleMapper userRoleMapper;
+    private final AppUserAssignMapper userAssignMapper;
     private final PasswordEncoder passwordEncoder;
+    private final com.auth.system.security.JwtTokenProvider userSessions;
+    private final com.auth.app.security.ServiceTokenSessionRegistry serviceSessions;
 
     @Override
     public PageResult<ClientVO> page(PageQuery query) {
@@ -50,6 +54,7 @@ public class AppClientServiceImpl implements AppClientService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ClientSecretVO create(ClientForm form) {
+        validate(form);
         if (clientMapper.selectCount(new LambdaQueryWrapper<AppClient>()
                 .eq(AppClient::getClientId, form.getClientId())) > 0) {
             throw new BusinessException("client_id 已存在：%s", form.getClientId());
@@ -76,6 +81,7 @@ public class AppClientServiceImpl implements AppClientService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void update(String clientId, ClientForm form) {
+        validate(form);
         AppClient client = requireClient(clientId);
         // client_id 不可改：忽略表单中的 clientId 字段
         AppClient patch = new AppClient();
@@ -100,6 +106,9 @@ public class AppClientServiceImpl implements AppClientService {
         patch.setId(requireClient(clientId).getId());
         patch.setStatus(status);
         clientMapper.updateById(patch);
+        if (status == AppClient.STATUS_DISABLED) {
+            invalidateClientSessions(clientId);
+        }
     }
 
     @Override
@@ -111,6 +120,7 @@ public class AppClientServiceImpl implements AppClientService {
         patch.setId(client.getId());
         patch.setClientSecret(passwordEncoder.encode(plainSecret));
         clientMapper.updateById(patch);
+        serviceSessions.invalidateClient(com.auth.framework.context.TenantContextHolder.getTenantId(), clientId);
         ClientSecretVO vo = new ClientSecretVO();
         vo.setClient(get(clientId));
         vo.setClientSecret(plainSecret);
@@ -160,10 +170,16 @@ public class AppClientServiceImpl implements AppClientService {
         // 删除：库里有但表单没有（同步回收用户侧授权）
         for (AppClientRole role : existing) {
             if (target.stream().noneMatch(t -> t.getRoleCode().equals(role.getRoleCode()))) {
+                List<Long> affectedUsers = userRoleMapper.selectList(
+                                new LambdaQueryWrapper<com.auth.app.entity.AppUserRole>()
+                                        .eq(com.auth.app.entity.AppUserRole::getClientId, clientId)
+                                        .eq(com.auth.app.entity.AppUserRole::getRoleCode, role.getRoleCode()))
+                        .stream().map(com.auth.app.entity.AppUserRole::getUserId).distinct().toList();
                 roleMapper.deleteById(role.getId());
                 userRoleMapper.delete(new LambdaQueryWrapper<com.auth.app.entity.AppUserRole>()
                         .eq(com.auth.app.entity.AppUserRole::getClientId, clientId)
                         .eq(com.auth.app.entity.AppUserRole::getRoleCode, role.getRoleCode()));
+                affectedUsers.forEach(userId -> userSessions.invalidateAppSessions(userId, clientId));
             }
         }
         // 插入：表单有但库里没有
@@ -189,5 +205,34 @@ public class AppClientServiceImpl implements AppClientService {
     private List<AppClientRole> listRoleEntities(String clientId) {
         return roleMapper.selectList(new LambdaQueryWrapper<AppClientRole>()
                 .eq(AppClientRole::getClientId, clientId).orderByAsc(AppClientRole::getId));
+    }
+
+    /** 客户端安全约束：精确 HTTP(S) 回调地址，角色编码不可重复。 */
+    private void validate(ClientForm form) {
+        try {
+            java.net.URI redirect = java.net.URI.create(form.getRedirectUri());
+            if (!("http".equalsIgnoreCase(redirect.getScheme()) || "https".equalsIgnoreCase(redirect.getScheme()))
+                    || redirect.getHost() == null || redirect.getUserInfo() != null || redirect.getFragment() != null) {
+                throw new BusinessException("回调地址必须是无用户信息、无片段的 HTTP(S) 绝对地址");
+            }
+        } catch (IllegalArgumentException exception) {
+            throw new BusinessException("回调地址格式不正确");
+        }
+        List<ClientForm.RoleItem> roles = form.getRoles() == null ? List.of() : form.getRoles();
+        long uniqueRoleCodes = roles.stream().map(ClientForm.RoleItem::getRoleCode).distinct().count();
+        if (uniqueRoleCodes != roles.size()) {
+            throw new BusinessException("应用角色编码不能重复");
+        }
+    }
+
+    /** 应用停用时撤销用户访问令牌与服务令牌。 */
+    private void invalidateClientSessions(String clientId) {
+        // 分页之外直接查询分配关系，避免遗漏尚未加载到管理列表的用户。
+        new java.util.HashSet<>(userAssignMapper.selectList(
+                        new LambdaQueryWrapper<com.auth.app.entity.AppUserAssign>()
+                                .eq(com.auth.app.entity.AppUserAssign::getClientId, clientId))
+                .stream().map(com.auth.app.entity.AppUserAssign::getUserId).toList())
+                .forEach(userId -> userSessions.invalidateAppSessions(userId, clientId));
+        serviceSessions.invalidateClient(com.auth.framework.context.TenantContextHolder.getTenantId(), clientId);
     }
 }

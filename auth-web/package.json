@@ -1,9 +1,9 @@
 {
-  "name": "auth-web",
+  "name": "saasguard-console",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "auth-center 统一认证中心管理端 - React 18 + TypeScript + Vite + Ant Design 5",
+  "description": "SaaSGuard IAM 多租户身份与访问管理控制台",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

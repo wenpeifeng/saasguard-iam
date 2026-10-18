@@ -4,11 +4,13 @@ import com.auth.app.entity.AppClient;
 import com.auth.app.service.AppClientService;
 import com.auth.common.exception.BusinessException;
 import com.auth.common.result.Result;
+import com.auth.framework.context.TenantContextHolder;
 import com.auth.framework.security.SecurityUtils;
 import com.auth.idm.entity.IdmUser;
 import com.auth.idm.mapper.IdmUserMapper;
 import com.auth.oidc.service.OidcAuthorizeService;
 import com.auth.oidc.service.OidcTokenService;
+import com.auth.system.service.TenantService;
 import io.jsonwebtoken.Claims;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -49,6 +51,9 @@ public class OidcController {
     private final OidcTokenService tokenService;
     private final AppClientService clientService;
     private final IdmUserMapper userMapper;
+    private final com.auth.app.service.AppAssignService assignService;
+    private final com.auth.system.security.JwtTokenProvider sessions;
+    private final TenantService tenantService;
 
     /** 签发者标识（写入 iss claim 与发现文档） */
     @Value("${auth.oidc.issuer:http://localhost:8082/api}")
@@ -69,7 +74,7 @@ public class OidcController {
         doc.put("logout_endpoint", issuer + "/oauth/logout");
         doc.put("response_types_supported", List.of("code"));
         doc.put("grant_types_supported", List.of("authorization_code", "client_credentials"));
-        doc.put("code_challenge_methods_supported", List.of("S256", "plain"));
+        doc.put("code_challenge_methods_supported", List.of("S256"));
         doc.put("subject_types_supported", List.of("public"));
         doc.put("id_token_signing_alg_values_supported", List.of("RS256"));
         doc.put("scopes_supported", List.of("openid", "profile"));
@@ -118,6 +123,7 @@ public class OidcController {
                                      @RequestParam("grant_type") String grantType,
                                      @RequestParam(value = "client_id", required = false) String clientId,
                                      @RequestParam(value = "client_secret", required = false) String clientSecret,
+                                     @RequestParam(value = "tenant_code", required = false) String tenantCode,
                                      @RequestParam(value = "code", required = false) String code,
                                      @RequestParam(value = "redirect_uri", required = false) String redirectUri,
                                      @RequestParam(value = "code_verifier", required = false) String codeVerifier) {
@@ -134,45 +140,11 @@ public class OidcController {
         if (clientId == null || clientSecret == null) {
             throw new BusinessException("缺少客户端凭证（client_id/client_secret）");
         }
-        if (!clientService.verifySecret(clientId, clientSecret)) {
-            throw new BusinessException("客户端凭证无效");
-        }
-        AppClient client = clientService.loadEnabledClient(clientId);
-        long validity = client.getAccessTokenValidity() == null ? 7200 : client.getAccessTokenValidity();
-
-        Map<String, Object> resp = new LinkedHashMap<>();
-        if ("client_credentials".equals(grantType)) {
-            // 服务间令牌（应用级启停/用户同步 API 用）
-            resp.put("access_token", tokenService.issueServiceToken(clientId, validity));
-            resp.put("token_type", "Bearer");
-            resp.put("expires_in", validity);
-            resp.put("scope", "service");
-            return resp;
-        }
-        if (!"authorization_code".equals(grantType)) {
-            throw new BusinessException("不支持的 grant_type：%s", grantType);
-        }
-        // 授权码 + PKCE
-        OidcAuthorizeService.CodePayload payload = authorizeService.consumeCode(
-                code, clientId, redirectUri, codeVerifier);
-        IdmUser user = userMapper.selectById(payload.getUserId());
-        if (user == null) {
-            throw new BusinessException("授权码对应用户不存在");
-        }
-        List<String> roles = authorizeService.rolesOf(clientId, payload.getUserId());
-        resp.put("access_token", tokenService.issueAccessToken(clientId, user.getId(), user.getUsername(),
-                user.getRealName(), user.getEmployeeNo(), user.getOrgId(), user.getTenantId(),
-                roles, payload.getScope(), validity));
-        resp.put("token_type", "Bearer");
-        resp.put("expires_in", validity);
-        resp.put("scope", payload.getScope() == null ? "openid profile" : payload.getScope());
-        // scope 含 openid 时签发 id_token（标准声明 + nonce 回显）
-        if (payload.getScope() == null || payload.getScope().contains("openid")) {
-            resp.put("id_token", tokenService.issueIdToken(clientId, user.getId(), user.getUsername(),
-                    user.getRealName(), user.getEmployeeNo(), user.getTenantId(),
-                    payload.getNonce(), Math.min(validity, 3600)));
-        }
-        return resp;
+        var tenant = tenantService.requireActive(tenantCode);
+        String resolvedClientId = clientId;
+        String resolvedSecret = clientSecret;
+        return TenantContextHolder.callWithTenant(tenant.getId(), () -> exchangeToken(
+                grantType, resolvedClientId, resolvedSecret, code, redirectUri, codeVerifier, tenant.getId()));
     }
 
     /**
@@ -209,6 +181,47 @@ public class OidcController {
         return Result.ok();
     }
 
+    /** 在已解析的租户上下文中校验客户端并完成令牌交换。 */
+    private Map<String, Object> exchangeToken(String grantType, String clientId, String clientSecret,
+                                              String code, String redirectUri, String codeVerifier,
+                                              Long tenantId) {
+        if (!clientService.verifySecret(clientId, clientSecret)) {
+            throw new BusinessException("客户端凭证无效");
+        }
+        AppClient client = clientService.loadEnabledClient(clientId);
+        long validity = client.getAccessTokenValidity() == null ? 7200 : client.getAccessTokenValidity();
+        Map<String, Object> resp = new LinkedHashMap<>();
+        if ("client_credentials".equals(grantType)) {
+            resp.put("access_token", tokenService.issueServiceToken(clientId, tenantId, validity));
+            resp.put("token_type", "Bearer");
+            resp.put("expires_in", validity);
+            resp.put("scope", "service");
+            return resp;
+        }
+        if (!"authorization_code".equals(grantType)) {
+            throw new BusinessException("不支持的 grant_type：%s", grantType);
+        }
+        OidcAuthorizeService.CodePayload payload = authorizeService.consumeCode(
+                code, clientId, redirectUri, codeVerifier);
+        IdmUser user = userMapper.selectById(payload.getUserId());
+        if (user == null) {
+            throw new BusinessException("授权码对应用户不存在");
+        }
+        List<String> roles = authorizeService.rolesOf(clientId, payload.getUserId());
+        resp.put("access_token", tokenService.issueAccessToken(clientId, user.getId(), user.getUsername(),
+                user.getRealName(), user.getEmployeeNo(), user.getOrgId(), user.getTenantId(),
+                roles, payload.getScope(), validity));
+        resp.put("token_type", "Bearer");
+        resp.put("expires_in", validity);
+        resp.put("scope", payload.getScope() == null ? "openid profile" : payload.getScope());
+        if (payload.getScope() == null || payload.getScope().contains("openid")) {
+            resp.put("id_token", tokenService.issueIdToken(clientId, user.getId(), user.getUsername(),
+                    user.getRealName(), user.getEmployeeNo(), user.getTenantId(),
+                    payload.getNonce(), Math.min(validity, 3600)));
+        }
+        return resp;
+    }
+
     /** 解析并校验 Bearer RS256 access token（黑名单校验） */
     private Claims requireAccessToken(String authorization) {
         if (authorization == null || !authorization.startsWith("Bearer ")) {
@@ -226,7 +239,27 @@ public class OidcController {
         if (tokenService.isRevoked(claims.getId())) {
             throw new BusinessException("令牌已登出失效");
         }
+        Long userId = Long.valueOf(claims.getSubject());
+        String clientId = claims.getAudience().iterator().next();
+        Long tenantId = claimTenantId(claims);
+        if (tenantId == null) {
+            throw new BusinessException("令牌缺少租户声明");
+        }
+        if (!tenantService.isActive(tenantId)) {
+            throw new BusinessException("令牌所属租户无效、已停用或已到期");
+        }
+        boolean active = TenantContextHolder.callWithTenant(tenantId, () ->
+                sessions.isAppSessionActive(userId, clientId, authorization.substring(7).trim())
+                        && assignService.checkLoginAccess(clientId, userId) != null);
+        if (!active) {
+            throw new BusinessException("应用访问已失效，请重新登录");
+        }
         return claims;
+    }
+
+    private Long claimTenantId(Claims claims) {
+        Object value = claims.get("tenantId");
+        return value instanceof Number number ? number.longValue() : null;
     }
 
     private void putIfPresent(Map<String, Object> map, String key, Object value) {

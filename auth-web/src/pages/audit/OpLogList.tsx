@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Input, Space, Tag } from 'antd'
+import { Input, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { SearchOutlined } from '@ant-design/icons'
 import PageHeader from '@/components/PageHeader'
 import PageTable from '@/components/PageTable'
+import FilterBar from '@/components/FilterBar'
 import { useDebounce } from '@/hooks/useDebounce'
 import { type OpLog } from '@/api/app'
 
@@ -45,16 +46,16 @@ export default function OpLogList() {
       <PageTable<OpLog>
         title="操作日志"
         url="/audit/op-logs"
-        queryKey={['audit', 'op-logs', debouncedUser, debouncedUri]}
+        queryKey={['audit', 'op-logs']}
         params={{ username: debouncedUser || undefined, uri: debouncedUri || undefined }}
         columns={columns}
         toolbar={
-          <Space wrap>
+          <FilterBar>
             <Input
               allowClear
               prefix={<SearchOutlined />}
               placeholder="操作人"
-              style={{ width: 140 }}
+              className="filter-field filter-field--medium"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
             />
@@ -62,11 +63,11 @@ export default function OpLogList() {
               allowClear
               prefix={<SearchOutlined />}
               placeholder="URI"
-              style={{ width: 220 }}
+              className="filter-field filter-field--large"
               value={uri}
               onChange={(e) => setUri(e.target.value)}
             />
-          </Space>
+          </FilterBar>
         }
       />
     </div>

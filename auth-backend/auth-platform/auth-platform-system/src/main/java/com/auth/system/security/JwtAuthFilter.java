@@ -39,8 +39,12 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private static final String AUTHORIZATION_HEADER = "Authorization";
     private static final String BEARER_PREFIX = "Bearer ";
 
+    /** 平台超管切换目标租户的请求头 */
+    private static final String TENANT_HEADER = "X-Tenant-Id";
+
     private final JwtTokenProvider tokenProvider;
     private final SysRoleService roleService;
+    private final com.auth.system.service.TenantService tenantService;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
@@ -53,6 +57,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                     Long userId = tokenProvider.getUserId(token);
                     Long tenantId = tokenProvider.getTenantId(token);
                     String username = tokenProvider.getUsername(token);
+                    if (!tenantService.isActive(tenantId)) {
+                        filterChain.doFilter(request, response);
+                        return;
+                    }
 
                     // 先落租户上下文，后续角色查询即被租户插件按正确租户过滤 —— 顺序不可颠倒
                     TenantContextHolder.set(new TenantContextHolder.TenantContext(tenantId));
@@ -66,6 +74,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                     List<SimpleGrantedAuthority> authorities = roleService.getRoleCodesByUserId(userId).stream()
                             .map(code -> new SimpleGrantedAuthority("ROLE_" + code))
                             .toList();
+                    Long requestedTenantId = resolveRequestedTenant(request, tenantId, authorities);
+                    if (!requestedTenantId.equals(tenantId)) {
+                        TenantContextHolder.set(new TenantContextHolder.TenantContext(requestedTenantId));
+                        MDC.put(MdcKeys.TENANT_ID, String.valueOf(requestedTenantId));
+                    }
                     UsernamePasswordAuthenticationToken authentication =
                             new UsernamePasswordAuthenticationToken(userId, null, authorities);
                     authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
@@ -97,5 +110,24 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             return token.isEmpty() ? null : token;
         }
         return null;
+    }
+
+    /**
+     * 平台超管可通过 X-Tenant-Id 切换数据视角；普通用户始终锁定令牌租户。
+     */
+    private Long resolveRequestedTenant(HttpServletRequest request, Long tokenTenantId,
+                                        List<SimpleGrantedAuthority> authorities) {
+        boolean superAdmin = authorities.stream()
+                .anyMatch(item -> "ROLE_SUPER_ADMIN".equals(item.getAuthority()));
+        String header = request.getHeader(TENANT_HEADER);
+        if (!superAdmin || header == null || header.isBlank()) {
+            return tokenTenantId;
+        }
+        try {
+            long requested = Long.parseLong(header);
+            return requested > 0 ? requested : tokenTenantId;
+        } catch (NumberFormatException ignored) {
+            return tokenTenantId;
+        }
     }
 }

@@ -6,7 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.FullyQualifiedAnnotationBeanNameGenerator;
 
 /**
- * 统一认证中心启动类。
+ * SaaSGuard IAM 启动类。
  * <p>
  * Mapper 扫描覆盖全部模块（com.auth.**.mapper）；Bean 名用全限定类名生成器，
  * 避免不同模块出现同名 Mapper 时 Bean 名冲突（照抄 ERP 启动约定）。

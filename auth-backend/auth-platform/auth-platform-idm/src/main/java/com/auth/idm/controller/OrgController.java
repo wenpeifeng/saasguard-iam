@@ -27,7 +27,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/idm/orgs")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('SUPER_ADMIN')")
+@PreAuthorize("hasAnyRole('SUPER_ADMIN','TENANT_ADMIN')")
 public class OrgController {
 
     private final OrgService orgService;

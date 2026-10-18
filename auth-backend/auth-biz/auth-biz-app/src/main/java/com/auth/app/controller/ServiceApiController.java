@@ -2,6 +2,8 @@ package com.auth.app.controller;
 
 import com.auth.app.dto.SyncUserVO;
 import com.auth.app.service.AppAssignService;
+import com.auth.idm.dto.BasicProfileForm;
+import com.auth.idm.dto.ResetPwdForm;
 import com.auth.common.result.Result;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -15,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import jakarta.validation.Valid;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -59,6 +62,26 @@ public class ServiceApiController {
                                      @RequestBody StatusForm form) {
         requireClientMatch(clientId);
         assignService.setAppStatusByEmployeeNo(clientId, employeeNo, form.isEnabled());
+        return Result.ok();
+    }
+
+    /** 子系统维护已分配员工的联系档案，事实源仍落在认证中心。 */
+    @Operation(summary = "维护员工基础档案")
+    @PutMapping("/apps/{clientId}/users/{employeeNo}/profile")
+    public Result<Void> updateProfile(@PathVariable String clientId, @PathVariable String employeeNo,
+                                      @Valid @RequestBody BasicProfileForm form) {
+        requireClientMatch(clientId);
+        assignService.updateProfileByEmployeeNo(clientId, employeeNo, form);
+        return Result.ok();
+    }
+
+    /** 子系统管理员重置统一账号密码；种子账号由中心保护为只读。 */
+    @Operation(summary = "重置统一账号密码")
+    @PutMapping("/apps/{clientId}/users/{employeeNo}/password")
+    public Result<Void> resetPassword(@PathVariable String clientId, @PathVariable String employeeNo,
+                                      @Valid @RequestBody ResetPwdForm form) {
+        requireClientMatch(clientId);
+        assignService.resetPasswordByEmployeeNo(clientId, employeeNo, form);
         return Result.ok();
     }
 

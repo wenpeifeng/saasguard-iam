@@ -13,13 +13,20 @@ import com.auth.app.service.AppClientService;
 import com.auth.common.exception.BusinessException;
 import com.auth.common.result.PageResult;
 import com.auth.framework.mybatis.PageUtils;
+import com.auth.framework.context.TenantContextHolder;
+import com.auth.framework.security.SecurityUtils;
 import com.auth.idm.entity.IdmOrg;
 import com.auth.idm.entity.IdmUser;
 import com.auth.idm.mapper.IdmOrgMapper;
 import com.auth.idm.mapper.IdmUserMapper;
+import com.auth.idm.dto.BasicProfileForm;
+import com.auth.idm.dto.ResetPwdForm;
+import com.auth.idm.service.IdmUserService;
+import com.auth.idm.event.IdentitySyncRequestedEvent;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -43,6 +50,9 @@ public class AppAssignServiceImpl implements AppAssignService {
     private final AppClientService clientService;
     private final IdmUserMapper userMapper;
     private final IdmOrgMapper orgMapper;
+    private final com.auth.system.security.JwtTokenProvider sessions;
+    private final IdmUserService idmUserService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public PageResult<AssignVO> pageAssigned(String clientId, AssignQuery query) {
@@ -50,9 +60,10 @@ public class AppAssignServiceImpl implements AppAssignService {
         LambdaQueryWrapper<AppUserAssign> wrapper = new LambdaQueryWrapper<AppUserAssign>()
                 .eq(AppUserAssign::getClientId, clientId)
                 .eq(query.getStatus() != null, AppUserAssign::getStatus, query.getStatus())
-                .in(query.getKeyword() != null && !query.getKeyword().isBlank(),
-                        AppUserAssign::getUserId, matchUserIds(query.getKeyword()))
                 .orderByDesc(AppUserAssign::getId);
+        if (query.getKeyword() != null && !query.getKeyword().isBlank()) {
+            wrapper.in(AppUserAssign::getUserId, matchUserIds(query.getKeyword()));
+        }
         // 先分页取分配行，再补用户/组织/角色信息（避免跨表 join 与租户插件冲突）
         PageResult<AppUserAssign> page = PageUtils.of(assignMapper, wrapper, query, AppUserAssign.class, v -> v);
         return PageResult.of(enrich(clientId, page.getRecords()),
@@ -73,8 +84,9 @@ public class AppAssignServiceImpl implements AppAssignService {
     @Transactional(rollbackFor = Exception.class)
     public void assign(String clientId, List<Long> userIds) {
         requireClientEnabledOrAny(clientId);
-        for (Long userId : userIds == null ? List.<Long>of() : userIds) {
-            IdmUser user = requireUser(userId);
+        boolean changed = false;
+        for (Long userId : userIds == null ? List.<Long>of() : userIds.stream().distinct().sorted().toList()) {
+            IdmUser user = lockUser(userId);
             requireActiveUser(user);
             Long exists = assignMapper.selectCount(new LambdaQueryWrapper<AppUserAssign>()
                     .eq(AppUserAssign::getClientId, clientId)
@@ -82,29 +94,38 @@ public class AppAssignServiceImpl implements AppAssignService {
             if (exists > 0) {
                 continue;
             }
+            if (assignMapper.restore(TenantContextHolder.getTenantId(), clientId, userId, SecurityUtils.getCurrentUserId()) > 0) {
+                changed = true;
+                continue;
+            }
             AppUserAssign assign = new AppUserAssign();
             assign.setClientId(clientId);
             assign.setUserId(userId);
             assign.setStatus(AppUserAssign.STATUS_ENABLED);
             assignMapper.insert(assign);
+            changed = true;
         }
+        if (changed) requestClientSync(clientId, "USER_ASSIGNED");
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void revoke(String clientId, Long userId) {
+        lockUser(userId);
         AppUserAssign assign = requireAssign(clientId, userId);
         assignMapper.deleteById(assign.getId());
         userRoleMapper.delete(new LambdaQueryWrapper<AppUserRole>()
                 .eq(AppUserRole::getClientId, clientId)
                 .eq(AppUserRole::getUserId, userId));
+        touch(clientId, userId);
+        requestClientSync(clientId, "USER_REVOKED");
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void setAppStatus(String clientId, Long userId, boolean enabled) {
+        IdmUser user = lockUser(userId);
         AppUserAssign assign = requireAssign(clientId, userId);
-        IdmUser user = requireUser(userId);
         // 前置校验收口：仅对在职员工可操作（离职/全局停用一律拒绝）
         if (user.getStatus() != IdmUser.STATUS_ACTIVE) {
             throw new BusinessException("仅在职员工可操作，当前状态：%s（离职/全局停用请在认证中心处置）",
@@ -117,23 +138,38 @@ public class AppAssignServiceImpl implements AppAssignService {
         patch.setId(assign.getId());
         patch.setStatus(enabled ? AppUserAssign.STATUS_ENABLED : AppUserAssign.STATUS_DISABLED);
         assignMapper.updateById(patch);
+        sessions.invalidateAppSessions(userId, clientId);
+        requestClientSync(clientId, enabled ? "APP_USER_ENABLED" : "APP_USER_DISABLED");
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void setAppStatusByEmployeeNo(String clientId, String employeeNo, boolean enabled) {
-        IdmUser user = userMapper.selectOne(new LambdaQueryWrapper<IdmUser>()
-                .eq(IdmUser::getEmployeeNo, employeeNo));
-        if (user == null) {
-            throw new BusinessException("工号不存在：%s", employeeNo);
-        }
+        IdmUser user = requireAssignedUser(clientId, employeeNo);
         setAppStatus(clientId, user.getId(), enabled);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public void updateProfileByEmployeeNo(String clientId, String employeeNo, BasicProfileForm form) {
+        IdmUser user = requireAssignedUser(clientId, employeeNo);
+        idmUserService.updateBasicProfile(user.getId(), form);
+        touchForSync(clientId, user.getId());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void resetPasswordByEmployeeNo(String clientId, String employeeNo, ResetPwdForm form) {
+        IdmUser user = requireAssignedUser(clientId, employeeNo);
+        idmUserService.resetPassword(user.getId(), form);
+        touch(clientId, user.getId());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public void grantRole(String clientId, Long userId, String roleCode) {
+        IdmUser user = lockUser(userId);
         requireAssign(clientId, userId);
-        IdmUser user = requireUser(userId);
         if (user.getStatus() != IdmUser.STATUS_ACTIVE) {
             throw new BusinessException("仅在职员工可操作");
         }
@@ -148,25 +184,42 @@ public class AppAssignServiceImpl implements AppAssignService {
         if (exists > 0) {
             return;
         }
+        if (userRoleMapper.restore(TenantContextHolder.getTenantId(), clientId, userId, roleCode, SecurityUtils.getCurrentUserId()) > 0) {
+            touch(clientId, userId);
+            requestClientSync(clientId, "ROLE_GRANTED");
+            return;
+        }
         AppUserRole role = new AppUserRole();
         role.setClientId(clientId);
         role.setUserId(userId);
         role.setRoleCode(roleCode);
         userRoleMapper.insert(role);
+        touch(clientId, userId);
+        requestClientSync(clientId, "ROLE_GRANTED");
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void revokeRole(String clientId, Long userId, String roleCode) {
+        requireActiveUser(lockUser(userId));
         requireAssign(clientId, userId);
         userRoleMapper.delete(new LambdaQueryWrapper<AppUserRole>()
                 .eq(AppUserRole::getClientId, clientId)
                 .eq(AppUserRole::getUserId, userId)
                 .eq(AppUserRole::getRoleCode, roleCode));
+        touch(clientId, userId);
+        requestClientSync(clientId, "ROLE_REVOKED");
+    }
+
+    private void requestClientSync(String clientId, String reason) {
+        eventPublisher.publishEvent(IdentitySyncRequestedEvent.client(
+                clientId, SecurityUtils.getCurrentClientId(), reason));
     }
 
     @Override
     public AssignVO checkLoginAccess(String clientId, Long userId) {
+        IdmUser user = userMapper.selectById(userId);
+        if (user == null || user.getStatus() != IdmUser.STATUS_ACTIVE) return null;
         AppClient client = clientService.loadEnabledClient(clientId);
         if (client == null) {
             return null;
@@ -184,19 +237,15 @@ public class AppAssignServiceImpl implements AppAssignService {
     @Override
     public List<SyncUserVO> syncUsers(String clientId, LocalDateTime updatedSince) {
         requireClientEnabledOrAny(clientId);
-        LambdaQueryWrapper<AppUserAssign> wrapper = new LambdaQueryWrapper<AppUserAssign>()
-                .eq(AppUserAssign::getClientId, clientId)
-                .gt(updatedSince != null, AppUserAssign::getUpdateTime, updatedSince)
-                .orderByAsc(AppUserAssign::getId);
-        List<AppUserAssign> assigns = assignMapper.selectList(wrapper);
+        List<AppUserAssign> assigns = assignMapper.forSync(TenantContextHolder.getTenantId(), clientId, updatedSince);
         if (assigns.isEmpty()) {
             return List.of();
         }
         Map<Long, IdmUser> users = userMapper.selectBatchIds(
                 assigns.stream().map(AppUserAssign::getUserId).toList()).stream()
                 .collect(Collectors.toMap(IdmUser::getId, Function.identity()));
-        Map<Long, String> orgNames = orgMapper.selectList(new LambdaQueryWrapper<>()).stream()
-                .collect(Collectors.toMap(IdmOrg::getId, IdmOrg::getName));
+        Map<Long, IdmOrg> orgs = orgMapper.selectList(new LambdaQueryWrapper<>()).stream()
+                .collect(Collectors.toMap(IdmOrg::getId, Function.identity()));
         Map<Long, List<String>> rolesByUser = userRoleMapper.selectList(new LambdaQueryWrapper<AppUserRole>()
                         .eq(AppUserRole::getClientId, clientId)).stream()
                 .collect(Collectors.groupingBy(AppUserRole::getUserId,
@@ -213,13 +262,30 @@ public class AppAssignServiceImpl implements AppAssignService {
                 return vo;
             }
             vo.setEmployeeNo(user.getEmployeeNo());
+            if (user.getUpdateTime() != null && user.getUpdateTime().isAfter(vo.getUpdateTime())) vo.setUpdateTime(user.getUpdateTime());
             vo.setUsername(user.getUsername());
             vo.setRealName(user.getRealName());
-            vo.setOrgName(orgNames.get(user.getOrgId()));
+            IdmOrg org = orgs.get(user.getOrgId());
+            if (org != null) {
+                vo.setOrgName(org.getName());
+                if (org.getUpdateTime() != null && org.getUpdateTime().isAfter(vo.getUpdateTime())) vo.setUpdateTime(org.getUpdateTime());
+            }
             vo.setPosition(user.getPosition());
+            vo.setEmail(user.getEmail());
+            vo.setPhone(user.getPhone());
+            vo.setAccountSource(user.getAccountSource());
+            vo.setImmutable(Boolean.TRUE.equals(user.getImmutable()));
+            vo.setIdentityStatus(user.getStatus());
+            vo.setEntryDate(user.getEntryDate());
+            vo.setLeaveDate(user.getLeaveDate());
+            vo.setIdentityCreateTime(user.getCreateTime());
             vo.setRoles(rolesByUser.getOrDefault(assign.getUserId(), List.of()));
             // active 合成：全局在职 且 应用级启用
-            if (user.getStatus() == IdmUser.STATUS_LEFT) {
+            if (Integer.valueOf(1).equals(assign.getDeleted())) {
+                vo.setActive(false);
+                vo.setRoles(List.of());
+                vo.setInactiveReason("REVOKED");
+            } else if (user.getStatus() == IdmUser.STATUS_LEFT) {
                 vo.setActive(false);
                 vo.setInactiveReason("LEFT");
             } else if (user.getStatus() == IdmUser.STATUS_SUSPENDED) {
@@ -321,12 +387,30 @@ public class AppAssignServiceImpl implements AppAssignService {
         return assign;
     }
 
-    private IdmUser requireUser(Long userId) {
-        IdmUser user = userMapper.selectById(userId);
-        if (user == null) {
-            throw new BusinessException("用户不存在");
-        }
+    private IdmUser lockUser(Long userId) {
+        IdmUser user = userMapper.selectOne(new LambdaQueryWrapper<IdmUser>().eq(IdmUser::getId, userId).last("FOR UPDATE"));
+        if (user == null) throw new BusinessException("用户不存在");
         return user;
+    }
+
+    private IdmUser requireAssignedUser(String clientId, String employeeNo) {
+        IdmUser user = userMapper.selectOne(new LambdaQueryWrapper<IdmUser>()
+                .eq(IdmUser::getEmployeeNo, employeeNo).last("FOR UPDATE"));
+        if (user == null) {
+            throw new BusinessException("工号不存在：%s", employeeNo);
+        }
+        requireAssign(clientId, user.getId());
+        return user;
+    }
+
+    private void touch(String clientId, Long userId) {
+        touchForSync(clientId, userId);
+        sessions.invalidateAppSessions(userId, clientId);
+    }
+
+    /** 仅推进下游同步水位；档案更新不应把正在工作的用户踢下线。 */
+    private void touchForSync(String clientId, Long userId) {
+        assignMapper.touch(TenantContextHolder.getTenantId(), clientId, userId, SecurityUtils.getCurrentUserId());
     }
 
     private void requireActiveUser(IdmUser user) {

@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Tag, Tree, Typography } from 'antd'
+import { Button, Card, Empty, Form, Input, InputNumber, Popconfirm, Select, Space, Tag, Tree, Typography } from 'antd'
+import type { DataNode } from 'antd/es/tree'
 import { ApartmentOutlined, DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
 import PageHeader from '@/components/PageHeader'
 import StatusTag from '@/components/StatusTag'
+import StandardModal from '@/components/StandardModal'
 import { useSubmitting } from '@/hooks/useSubmitting'
-import { fetchOrgTree, createOrg, updateOrg, deleteOrg, type OrgTreeNode, type OrgForm } from '@/api/idm'
+import { fetchOrgTree, createOrg, updateOrg, deleteOrg, ORG_TYPES, type OrgTreeNode, type OrgForm } from '@/api/idm'
 
 const { Text } = Typography
 
@@ -79,7 +81,8 @@ export default function OrgTree() {
   const openCreate = (parentId: number | null) => {
     setEditingId(null)
     form.resetFields()
-    form.setFieldsValue({ parentId, sort: 0, status: 1 })
+    const parentType = parentId ? flat[parentId]?.node.orgType : undefined
+    form.setFieldsValue({ parentId, orgType: parentType === 'WORKSHOP' ? 'TEAM' : parentType === 'GROUP' ? 'COMPANY' : parentType === 'COMPANY' ? 'FACTORY' : parentId ? 'DEPARTMENT' : 'GROUP', sort: 0, status: 1 })
     setModalOpen(true)
   }
 
@@ -89,6 +92,7 @@ export default function OrgTree() {
     setEditingId(id)
     form.setFieldsValue({
       code: entry.node.code,
+      orgType: entry.node.orgType,
       name: entry.node.name,
       parentId: entry.parentId,
       sort: entry.node.sort,
@@ -98,15 +102,16 @@ export default function OrgTree() {
   }
 
   /** 树数据：标题 = 名称 + 编码 + 状态徽标；停用节点置灰 */
-  const treeData = (nodes: OrgTreeNode[]): any[] =>
+  const treeData = (nodes: OrgTreeNode[]): DataNode[] =>
     nodes.map((n) => ({
       key: n.id,
       title: (
-        <span style={{ opacity: n.status === 1 ? 1 : 0.45 }}>
+        <span className={n.status === 1 ? 'org-tree-node' : 'org-tree-node org-tree-node--disabled'}>
           {n.name}
-          <span style={{ color: '#94a3b8', fontSize: 12, marginLeft: 8 }}>{n.code}</span>
+          <Tag>{ORG_TYPES.find((type) => type.value === n.orgType)?.label ?? '待分类'}</Tag>
+          <span className="org-tree-code">{n.code}</span>
           {n.status !== 1 && (
-            <Tag style={{ marginLeft: 8, transform: 'scale(0.85)' }}>停用</Tag>
+            <Tag className="org-tree-status">停用</Tag>
           )}
         </span>
       ),
@@ -134,7 +139,7 @@ export default function OrgTree() {
     const walk = (nodes: OrgTreeNode[], prefix: string): { value: number; label: string }[] =>
       nodes.filter((n) => !excluded.has(n.id)).flatMap((n) => {
         const label = prefix + n.name
-        return [{ value: n.id, label }, ...walk(n.children ?? [], `${label} / `)]
+        return n.status === 1 ? [{ value: n.id, label }, ...walk(n.children ?? [], `${label} / `)] : []
       })
     return walk(tree, '')
   }, [tree, editingId])
@@ -151,19 +156,19 @@ export default function OrgTree() {
         }
       />
 
-      <div style={{ display: 'flex', gap: 14, alignItems: 'stretch' }}>
+      <div className="org-workspace">
         {/* 左：组织树卡片 */}
-        <Card style={{ flex: 1, borderRadius: 14 }} styles={{ body: { paddingTop: 14 } }}>
+        <Card className="org-tree-card">
           <Input
             allowClear
-            prefix={<SearchOutlined style={{ color: '#94a3b8' }} />}
+            prefix={<SearchOutlined />}
             placeholder="搜索组织名称 / 编码"
-            style={{ marginBottom: 14 }}
+            className="org-search"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
           />
           {shown.length === 0 ? (
-            <Empty description={keyword ? '无匹配组织' : '暂无组织'} style={{ padding: '48px 0' }} />
+            <Empty description={keyword ? '无匹配组织' : '暂无组织'} className="org-empty" />
           ) : (
             <Tree
               blockNode
@@ -172,23 +177,25 @@ export default function OrgTree() {
               treeData={treeData(shown)}
               selectedKeys={selected != null ? [selected] : []}
               onSelect={(keys) => setSelected((keys[0] as number) ?? null)}
-              style={{ fontSize: 14 }}
+              className="org-tree"
             />
           )}
         </Card>
 
         {/* 右：选中节点详情卡 */}
-        <Card style={{ width: 340, borderRadius: 14 }} styles={{ body: { paddingTop: 18 } }}>
+        <Card className="org-detail-card">
           {selectedEntry ? (
-            <Space direction="vertical" size={14} style={{ width: '100%' }}>
-              <Space>
-                <ApartmentOutlined style={{ fontSize: 22, color: '#2563eb' }} />
-                <span style={{ fontSize: 18, fontWeight: 650 }}>{selectedEntry.node.name}</span>
+            <Space direction="vertical" size={14} className="stack-fill">
+              <Space className="org-detail-heading">
+                <ApartmentOutlined className="org-detail-icon" />
+                <span className="org-detail-title">{selectedEntry.node.name}</span>
                 <StatusTag value={selectedEntry.node.status} />
               </Space>
-              <div style={{ display: 'grid', gridTemplateColumns: '64px 1fr', rowGap: 8, fontSize: 13 }}>
+              <div className="org-detail-grid">
                 <Text type="secondary">编码</Text>
                 <Text>{selectedEntry.node.code}</Text>
+                <Text type="secondary">组织类型</Text>
+                <Text>{ORG_TYPES.find((type) => type.value === selectedEntry.node.orgType)?.label}</Text>
                 <Text type="secondary">上级组织</Text>
                 <Text>{selectedEntry.parentId != null ? flat[selectedEntry.parentId]?.node.name ?? '-' : '（根节点）'}</Text>
                 <Text type="secondary">排序号</Text>
@@ -196,8 +203,8 @@ export default function OrgTree() {
                 <Text type="secondary">下级组织</Text>
                 <Text>{(selectedEntry.node.children ?? []).length} 个</Text>
               </div>
-              <Space wrap style={{ marginTop: 6 }}>
-                <Button icon={<PlusOutlined />} onClick={() => openCreate(selectedEntry.node.id)}>
+              <Space wrap className="org-detail-actions">
+                <Button icon={<PlusOutlined />} disabled={selectedEntry.node.status !== 1 || selectedEntry.node.orgType === 'TEAM'} onClick={() => openCreate(selectedEntry.node.id)}>
                   新建下级
                 </Button>
                 <Button icon={<EditOutlined />} onClick={() => openEdit(selectedEntry.node.id)}>
@@ -205,7 +212,7 @@ export default function OrgTree() {
                 </Button>
                 <Popconfirm
                   title={`删除「${selectedEntry.node.name}」？`}
-                  description="仅允许删除无下级组织且无在职用户的节点"
+                  description="仅允许删除无下级组织且无员工档案的节点，离职档案也需保留归属。"
                   okText="删除"
                   okButtonProps={{ danger: true }}
                   onConfirm={() => doDelete.run(selectedEntry.node.id)}
@@ -218,20 +225,22 @@ export default function OrgTree() {
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
               description="点击左侧节点查看详情与操作"
-              style={{ padding: '72px 0' }}
+              className="org-empty org-empty--detail"
             />
           )}
         </Card>
       </div>
 
       {/* 新建/修改弹窗：上级组织改用树形选择 */}
-      <Modal
+      <StandardModal
+        size="medium"
         title={editingId ? `修改组织 - ${flat[editingId]?.node.name}` : '新建组织'}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={() => form.submit()}
+        okText={editingId ? '保存修改' : '创建组织'}
+        cancelText="取消"
         confirmLoading={submitSave.loading}
-        destroyOnClose
       >
         <Form form={form} layout="vertical" onFinish={(v) => submitSave.run(v)}>
           <Form.Item name="parentId" label="上级组织" initialValue={null}>
@@ -243,17 +252,22 @@ export default function OrgTree() {
               placeholder="留空即为根组织"
             />
           </Form.Item>
-          <Form.Item name="code" label="组织编码" rules={[{ required: true, message: '请输入编码' }]}>
-            <Input placeholder="如 FACTORY-01" />
+          <Form.Item name="orgType" label="组织类型" rules={[{ required: true, message: '请选择组织类型' }]}>
+            <Select options={[...ORG_TYPES]} />
           </Form.Item>
+          {editingId && (
+            <Form.Item name="code" label="组织编码">
+              <Input disabled />
+            </Form.Item>
+          )}
           <Form.Item name="name" label="组织名称" rules={[{ required: true, message: '请输入名称' }]}>
             <Input />
           </Form.Item>
-          <Space style={{ display: 'flex' }} align="start">
-            <Form.Item name="sort" label="排序" initialValue={0} style={{ width: 120 }}>
-              <InputNumber min={0} style={{ width: '100%' }} />
+          <div className="form-grid form-grid--compact">
+            <Form.Item name="sort" label="排序" initialValue={0}>
+              <InputNumber min={0} className="control-fill" />
             </Form.Item>
-            <Form.Item name="status" label="状态" initialValue={1} style={{ width: 160 }}>
+            <Form.Item name="status" label="状态" initialValue={1}>
               <Select
                 options={[
                   { value: 1, label: '启用' },
@@ -261,9 +275,9 @@ export default function OrgTree() {
                 ]}
               />
             </Form.Item>
-          </Space>
+          </div>
         </Form>
-      </Modal>
+      </StandardModal>
     </div>
   )
 }

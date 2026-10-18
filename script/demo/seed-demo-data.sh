@@ -6,7 +6,7 @@
 # 前置：后端已运行（localhost:8082），种子超管 admin/123456 未改密。
 # 可重复执行：工号已存在会报错跳过该用户（幂等性靠工号唯一键）。
 #
-# 演示密码统一：User@123456
+# 演示密码统一：123456
 # 覆盖场景：在职（普通/系统管理员标签）/ 离职终态 / 全局停用 / 应用级禁用（ERP 管理端视角）
 # ============================================================
 set -uo pipefail
@@ -46,11 +46,11 @@ WS2=$(org 注塑车间 ORG-EAST-INJ "$EAST")
 WS3=$(org 包装车间 ORG-SOUTH-PKG "$SOUTH")
 echo "华东=$EAST 华南=$SOUTH 车间=$WS1/$WS2/$WS3"
 
-step "2. 建号（统一口令 User@123456）"
+step "2. 建号（统一口令 123456）"
 mkuser() { # employeeNo realName orgId position -> userId
   local resp
   resp=$(curl -s -X POST "$BASE/idm/users" -H "$AUTH" -H 'Content-Type: application/json' \
-    -d "{\"employeeNo\":\"$1\",\"realName\":\"$2\",\"orgId\":$3,\"position\":\"$4\",\"password\":\"User@123456\",\"entryDate\":\"2026-01-15\"}")
+    -d "{\"employeeNo\":\"$1\",\"realName\":\"$2\",\"orgId\":$3,\"position\":\"$4\",\"password\":\"123456\",\"entryDate\":\"2026-01-15\"}")
   local id=$(echo "$resp" | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d["data"] or "")')
   if [ -z "$id" ]; then
     id=$(curl -s "$BASE/idm/users?keyword=$1" -H "$AUTH" | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["records"][0]["id"])')
@@ -91,9 +91,9 @@ curl -s -X PUT "$BASE/service/apps/erp-web/users/E2007/status" \
 
 step "5. 制造几条登录审计日志（成功/失败各一）"
 curl -s -X POST "$BASE/auth/login" -H 'Content-Type: application/json' \
-  -d '{"username":"E2001","password":"User@123456","loginType":"OIDC","clientId":"erp-web"}' >/dev/null
+  -d '{"username":"E2001","password":"123456","loginType":"OIDC","clientId":"erp-web"}' >/dev/null
 curl -s -X POST "$BASE/auth/login" -H 'Content-Type: application/json' \
-  -d '{"username":"E2005","password":"User@123456"}' >/dev/null
+  -d '{"username":"E2005","password":"123456"}' >/dev/null
 echo "完成（E2001 成功登录 + E2005 离职拒绝登录，均已落审计）"
 
 step "6. 结果核对"
@@ -109,4 +109,4 @@ import sys,json
 for u in json.load(sys.stdin)["data"]:
     print("  %-7s %-5s active=%-5s %-12s roles=%s" % (u["employeeNo"], u["realName"], u["active"], u["inactiveReason"] or "", u["roles"]))'
 echo
-echo "演示数据就绪 ✅  统一口令：User@123456（admin 除外）"
+echo "演示数据就绪 ✅  统一口令：123456"

@@ -1,5 +1,5 @@
 #!/bin/bash
-# sf-auth 统一认证中心一键停止脚本
+# SaaSGuard IAM 一键停止脚本
 # 停止：后端 java 进程、前端 dev server；数据库容器默认保留（--with-db 时一并停止）
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"

@@ -3,6 +3,8 @@ package com.auth.app.service;
 import com.auth.app.dto.AssignQuery;
 import com.auth.app.dto.AssignVO;
 import com.auth.app.dto.SyncUserVO;
+import com.auth.idm.dto.BasicProfileForm;
+import com.auth.idm.dto.ResetPwdForm;
 import com.auth.common.result.PageResult;
 import lombok.Data;
 
@@ -54,6 +56,12 @@ public interface AppAssignService {
 
     /** 按工号做应用级启停（服务间 API 入口，同样受在职校验约束） */
     void setAppStatusByEmployeeNo(String clientId, String employeeNo, boolean enabled);
+
+    /** 子系统受控回写员工基础档案（须已分配到该应用，种子账号不可写）。 */
+    void updateProfileByEmployeeNo(String clientId, String employeeNo, BasicProfileForm form);
+
+    /** 子系统受控重置统一账号密码（须已分配到该应用，种子账号不可写）。 */
+    void resetPasswordByEmployeeNo(String clientId, String employeeNo, ResetPwdForm form);
 
     /** 授予角色标签（必须为应用已声明角色） */
     void grantRole(String clientId, Long userId, String roleCode);

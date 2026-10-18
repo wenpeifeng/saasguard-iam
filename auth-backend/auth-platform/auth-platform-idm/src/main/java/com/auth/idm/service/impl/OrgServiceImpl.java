@@ -8,6 +8,7 @@ import com.auth.idm.entity.IdmUser;
 import com.auth.idm.mapper.IdmOrgMapper;
 import com.auth.idm.mapper.IdmUserMapper;
 import com.auth.idm.service.OrgService;
+import com.auth.idm.service.NumberService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -27,6 +28,7 @@ public class OrgServiceImpl implements OrgService {
 
     private final IdmOrgMapper orgMapper;
     private final IdmUserMapper userMapper;
+    private final NumberService numberService;
 
     @Override
     public List<OrgTreeNode> tree() {
@@ -42,10 +44,11 @@ public class OrgServiceImpl implements OrgService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long create(OrgForm form) {
-        requireUniqueCode(form.getCode(), null);
-        requireParent(form.getParentId());
+        lockTree();
+        requireParent(form, null);
         IdmOrg org = new IdmOrg();
-        org.setCode(form.getCode());
+        org.setCode(numberService.next(form.getOrgType().prefix()));
+        org.setOrgType(form.getOrgType());
         org.setName(form.getName());
         org.setParentId(form.getParentId());
         org.setSort(form.getSort());
@@ -57,16 +60,25 @@ public class OrgServiceImpl implements OrgService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void update(Long id, OrgForm form) {
-        requireExists(id);
-        requireUniqueCode(form.getCode(), id);
-        // 上级不能选自己（否则树成环）
-        if (form.getParentId().equals(id)) {
-            throw new BusinessException("上级组织不能选择自己");
+        lockTree();
+        IdmOrg current = orgMapper.selectById(id);
+        if (current == null) throw new BusinessException("组织不存在");
+        if (form.getCode() != null && !form.getCode().equals(current.getCode())) {
+            throw new BusinessException("组织编码创建后不可修改");
         }
-        requireParent(form.getParentId());
+        requireParent(form, id);
+        List<IdmOrg> children = orgMapper.selectList(new LambdaQueryWrapper<IdmOrg>().eq(IdmOrg::getParentId, id));
+        if (children.stream().anyMatch(child -> !form.getOrgType().accepts(child.getOrgType()))) {
+            throw new BusinessException("该类型与现有下级组织不兼容，请先调整下级组织");
+        }
+        if (form.getStatus() == 0 && (children.stream().anyMatch(child -> child.getStatus() == 1)
+                || userMapper.selectCount(new LambdaQueryWrapper<IdmUser>().eq(IdmUser::getOrgId, id)
+                    .ne(IdmUser::getStatus, IdmUser.STATUS_LEFT)) > 0)) {
+            throw new BusinessException("请先转移在职员工并停用下级组织，再停用本组织");
+        }
         IdmOrg org = new IdmOrg();
         org.setId(id);
-        org.setCode(form.getCode());
+        org.setOrgType(form.getOrgType());
         org.setName(form.getName());
         org.setParentId(form.getParentId());
         org.setSort(form.getSort());
@@ -77,6 +89,7 @@ public class OrgServiceImpl implements OrgService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void delete(Long id) {
+        lockTree();
         requireExists(id);
         if (orgMapper.selectCount(new LambdaQueryWrapper<IdmOrg>().eq(IdmOrg::getParentId, id)) > 0) {
             throw new BusinessException("组织下存在子组织，不能删除");
@@ -87,26 +100,30 @@ public class OrgServiceImpl implements OrgService {
         orgMapper.deleteById(id);
     }
 
-    /** 校验编码唯一（排除自身） */
-    private void requireUniqueCode(String code, Long excludeId) {
-        Long cnt = orgMapper.selectCount(new LambdaQueryWrapper<IdmOrg>()
-                .eq(IdmOrg::getCode, code).ne(excludeId != null, IdmOrg::getId, excludeId));
-        if (cnt > 0) {
-            throw new BusinessException("组织编码已存在：%s", code);
-        }
+    /** 组织规模较小，结构修改串行校验，避免两个并发挂靠请求相互形成环。 */
+    private void lockTree() {
+        orgMapper.selectList(new LambdaQueryWrapper<IdmOrg>().last("FOR UPDATE"));
     }
 
     /** 校验组织存在且启用（根 0 免验） */
-    private void requireParent(Long parentId) {
+    private void requireParent(OrgForm form, Long selfId) {
+        Long parentId = form.getParentId();
         if (parentId == 0L) {
+            if (!form.getOrgType().isRootType()) throw new BusinessException("部门、车间和班组必须选择上级组织");
             return;
         }
-        IdmOrg parent = orgMapper.selectById(parentId);
-        if (parent == null) {
-            throw new BusinessException("上级组织不存在");
-        }
-        if (parent.getStatus() == 0) {
-            throw new BusinessException("上级组织已停用");
+        java.util.Set<Long> visited = new java.util.HashSet<>();
+        boolean directParent = true;
+        while (parentId != 0L) {
+            if (parentId.equals(selfId) || !visited.add(parentId)) throw new BusinessException("上级组织不能选择自己或自己的下级组织");
+            IdmOrg parent = orgMapper.selectById(parentId);
+            if (parent == null) throw new BusinessException("上级组织不存在");
+            if (parent.getStatus() == 0) throw new BusinessException("上级组织已停用");
+            if (directParent && !parent.getOrgType().accepts(form.getOrgType())) {
+                throw new BusinessException("组织类型与上级不兼容");
+            }
+            directParent = false;
+            parentId = parent.getParentId();
         }
     }
 
@@ -121,6 +138,7 @@ public class OrgServiceImpl implements OrgService {
         node.setId(org.getId());
         node.setCode(org.getCode());
         node.setName(org.getName());
+        node.setOrgType(org.getOrgType());
         node.setParentId(org.getParentId());
         node.setSort(org.getSort());
         node.setStatus(org.getStatus());

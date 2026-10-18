@@ -20,7 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/audit")
 @RequiredArgsConstructor
-@PreAuthorize("hasAnyRole('SUPER_ADMIN','AUDITOR')")
+@PreAuthorize("hasAnyRole('SUPER_ADMIN','TENANT_ADMIN','AUDITOR')")
 public class AuditController {
 
     private final AuditService auditService;

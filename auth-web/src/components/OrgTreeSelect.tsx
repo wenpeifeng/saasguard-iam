@@ -6,13 +6,13 @@ import { fetchOrgTree, type OrgTreeNode } from '@/api/idm'
 type DefaultOptionType = NonNullable<TreeSelectProps['treeData']>[number]
 
 /** 后端组织树 → TreeSelect 数据（searchText 供搜索：名称+编码） */
-function toTreeData(nodes: OrgTreeNode[], disableDisabled: boolean): DefaultOptionType[] {
+function toTreeData(nodes: OrgTreeNode[], disableDisabled: boolean, ancestorDisabled = false): DefaultOptionType[] {
   return nodes.map((n) => ({
     value: n.id,
     title: n.name,
     searchText: `${n.name} ${n.code}`,
-    disabled: disableDisabled && n.status !== 1,
-    children: n.children?.length ? toTreeData(n.children, disableDisabled) : undefined,
+    disabled: disableDisabled && (ancestorDisabled || n.status !== 1),
+    children: n.children?.length ? toTreeData(n.children, disableDisabled, ancestorDisabled || n.status !== 1) : undefined,
   }))
 }
 
@@ -28,18 +28,21 @@ export default function OrgTreeSelect({
   placeholder = '请选择组织',
   allowClear = false,
   disableDisabled = false,
-  style,
+  disabled = false,
+  className,
 }: {
   value?: number | null
   onChange?: (value: number | null) => void
   placeholder?: string
   allowClear?: boolean
   disableDisabled?: boolean
-  style?: React.CSSProperties
+  disabled?: boolean
+  className?: string
 }) {
   const { data: tree } = useQuery({ queryKey: ['orgs', 'tree'], queryFn: fetchOrgTree })
   return (
     <TreeSelect
+      disabled={disabled}
       showSearch
       treeNodeFilterProp="searchText"
       allowClear={allowClear}
@@ -49,7 +52,7 @@ export default function OrgTreeSelect({
       treeData={toTreeData(tree ?? [], disableDisabled)}
       treeDefaultExpandAll
       treeLine
-      style={{ width: '100%', ...style }}
+      className={['control-fill', className].filter(Boolean).join(' ')}
       popupMatchSelectWidth={false}
     />
   )

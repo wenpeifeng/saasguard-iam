@@ -3,6 +3,7 @@ package com.auth.system.service.impl;
 import com.auth.common.result.PageResult;
 import com.auth.framework.context.TenantContextHolder;
 import com.auth.framework.mybatis.PageUtils;
+import com.auth.system.dto.LoginAuditCommand;
 import com.auth.system.entity.AuditLoginLog;
 import com.auth.system.entity.AuditOpLog;
 import com.auth.system.mapper.AuditLoginLogMapper;
@@ -29,25 +30,25 @@ public class AuditServiceImpl implements AuditService {
 
     @Async
     @Override
-    public void recordLogin(String username, Long userId, String loginType, String clientId,
-                            boolean success, String failReason, String ip, String userAgent) {
+    public void recordLogin(LoginAuditCommand command) {
         try {
             AuditLoginLog entry = new AuditLoginLog();
-            entry.setTenantId(TenantContextHolder.getTenantId());
-            entry.setUserId(userId);
-            entry.setUsername(username);
-            entry.setLoginType(loginType == null ? "ADMIN" : loginType);
-            entry.setClientId(clientId);
-            entry.setSuccess(success ? 1 : 0);
-            entry.setFailReason(failReason);
-            entry.setIp(ip);
+            entry.setTenantId(command.getTenantId());
+            entry.setUserId(command.getUserId());
+            entry.setUsername(command.getUsername());
+            entry.setLoginType(command.getLoginType() == null ? "ADMIN" : command.getLoginType());
+            entry.setClientId(command.getClientId());
+            entry.setSuccess(command.isSuccess() ? 1 : 0);
+            entry.setFailReason(command.getFailReason());
+            entry.setIp(command.getIp());
             // UA 截断防超长
+            String userAgent = command.getUserAgent();
             entry.setUserAgent(userAgent != null && userAgent.length() > 512
                     ? userAgent.substring(0, 512) : userAgent);
             entry.setCreateTime(LocalDateTime.now());
-            loginLogMapper.insert(entry);
+            TenantContextHolder.runWithTenant(command.getTenantId(), () -> loginLogMapper.insert(entry));
         } catch (Exception e) {
-            log.error("[审计] 登录日志落库失败 username={}", username, e);
+            log.error("[审计] 登录日志落库失败 username={}", command.getUsername(), e);
         }
     }
 
@@ -55,10 +56,8 @@ public class AuditServiceImpl implements AuditService {
     @Override
     public void recordOp(AuditOpLog opLog) {
         try {
-            if (opLog.getTenantId() == null) {
-                opLog.setTenantId(TenantContextHolder.getTenantId());
-            }
-            opLogMapper.insert(opLog);
+            Long tenantId = opLog.getTenantId();
+            TenantContextHolder.runWithTenant(tenantId, () -> opLogMapper.insert(opLog));
         } catch (Exception e) {
             log.error("[审计] 操作日志落库失败 uri={}", opLog.getUri(), e);
         }

@@ -1,9 +1,9 @@
-# ================= auth-center 后端全局配置 =================
+# ================= SaaSGuard IAM 后端全局配置 =================
 # 环境差异配置放 application-{profile}.yml，本文件只放与环境无关的部分。
 
 spring:
   application:
-    name: auth-backend
+    name: saasguard-iam
   profiles:
     active: dev   # 开发环境；生产用 -Dspring.profiles.active=prod 覆盖
 
@@ -33,6 +33,16 @@ spring:
     # 并行开发场景：脚本版本号落盘顺序与提交顺序可能不一致，允许补执行历史间隙
     out-of-order: true
 
+# 认证中心是人员唯一事实源：主档/分配/角色标签提交后立即推送子系统对账。
+# 回调失败时不回滚人事操作，ERP/MES 每分钟全量对账作为兜底。
+identity:
+  sync:
+    enabled: true
+    callback-token: ${IDENTITY_SYNC_TOKEN:identity-sync-token}
+    targets:
+      erp-web: http://localhost:8080/api/auth/sso/internal/sync
+      mes-web: http://localhost:8081/api/integration/auth/internal/sync
+
 mybatis-plus:
   configuration:
     # 下划线列名自动映射驼峰属性（sys_user_name -> sysUserName）
@@ -61,7 +71,7 @@ springdoc:
 
 # 日志：格式与级别统一由 logback-spring.xml 管理（三类日志规范见 docs/日志规范.md）。
 # - 级别：dev 业务 DEBUG（MyBatis Slf4j 打印 SQL）；prod/默认 INFO、MyBatis WARN；
-# - 文件：logging.file.path 注入 LOG_PATH，JSON 结构化输出 {LOG_PATH}/auth-backend.json
+# - 文件：logging.file.path 注入 LOG_PATH，JSON 结构化输出 {LOG_PATH}/saasguard-iam.json
 #   （相对启动目录 = 仓库根/logs/，按天 + 100MB 滚动保留 30 天）；
 # - 注意：不要在 yml 里配 logging.level.*，否则会覆盖 logback-spring.xml 的 profile 分级。
 logging:

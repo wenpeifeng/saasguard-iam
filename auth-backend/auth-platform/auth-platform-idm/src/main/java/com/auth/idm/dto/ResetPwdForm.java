@@ -11,7 +11,7 @@ import lombok.Data;
 public class ResetPwdForm {
 
     /** 新口令（BCrypt 加密后入库） */
-    @NotBlank(message = "新口令不能为空")
-    @Size(min = 8, max = 64, message = "口令长度须为 8-64 位")
+    @NotBlank(message = "新密码不能为空")
+    @Size(min = 6, max = 64, message = "密码长度须为 6-64 位")
     private String password;
 }

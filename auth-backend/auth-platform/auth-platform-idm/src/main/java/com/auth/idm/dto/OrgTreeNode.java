@@ -19,6 +19,9 @@ public class OrgTreeNode {
     /** 组织名称 */
     private String name;
 
+    /** 组织类型。 */
+    private com.auth.idm.entity.OrgType orgType;
+
     /** 上级组织 ID */
     private Long parentId;
 

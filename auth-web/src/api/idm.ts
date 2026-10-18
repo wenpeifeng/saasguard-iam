@@ -3,11 +3,23 @@ import type { PageResult } from './request'
 
 /* ---------------- 组织 ---------------- */
 
+export const ORG_TYPES = [
+  { value: 'GROUP', label: '集团', prefix: 'GRP' },
+  { value: 'COMPANY', label: '公司', prefix: 'CO' },
+  { value: 'FACTORY', label: '工厂', prefix: 'FAC' },
+  { value: 'DEPARTMENT', label: '部门', prefix: 'DEPT' },
+  { value: 'WORKSHOP', label: '车间', prefix: 'WS' },
+  { value: 'TEAM', label: '班组', prefix: 'TEAM' },
+  { value: 'OTHER', label: '其他／待分类', prefix: 'ORG' },
+] as const
+export type OrgType = typeof ORG_TYPES[number]['value']
+
 /** 组织树节点（后端 OrgTreeNode） */
 export interface OrgTreeNode {
   id: number
   code: string
   name: string
+  orgType: OrgType
   parentId: number | null
   sort: number
   status: number
@@ -16,7 +28,8 @@ export interface OrgTreeNode {
 
 /** 组织表单 */
 export interface OrgForm {
-  code: string
+  code?: string
+  orgType: OrgType
   name: string
   parentId: number | null
   sort?: number
@@ -30,12 +43,12 @@ export function fetchOrgTree() {
 
 /** 新建组织 */
 export function createOrg(form: OrgForm) {
-  return post<number>('/idm/orgs', form)
+  return post<number>('/idm/orgs', { ...form, parentId: form.parentId ?? 0 })
 }
 
 /** 修改组织 */
 export function updateOrg(id: number, form: OrgForm) {
-  return put<void>(`/idm/orgs/${id}`, form)
+  return put<void>(`/idm/orgs/${id}`, { ...form, parentId: form.parentId ?? 0 })
 }
 
 /** 删除组织 */
@@ -67,11 +80,13 @@ export interface UserVO {
   entryDate: string | null
   leaveDate: string | null
   createTime: string | null
+  accountSource: 'MANUAL' | 'SEED'
+  immutable: boolean
 }
 
 /** 建号/改档表单（后端 UserForm，工号不可变） */
 export interface UserForm {
-  employeeNo: string
+  employeeNo?: string
   realName: string
   orgId: number | null
   position?: string
@@ -95,6 +110,20 @@ export function pageUsers(params: {
 /** 入职建号 */
 export function createUser(form: UserForm) {
   return post<number>('/idm/users', form)
+}
+
+export function getUser(id: number) {
+    return get<UserVO>(`/idm/users/${id}`)
+}
+
+export interface UserEventVO {
+  id: number
+  eventType: string
+  detail: string | null
+  createTime: string
+}
+export function getUserEvents(id: number) {
+  return get<UserEventVO[]>(`/idm/users/${id}/events`)
 }
 
 /** 修改基本信息 */

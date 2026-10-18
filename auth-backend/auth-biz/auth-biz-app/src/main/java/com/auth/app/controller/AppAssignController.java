@@ -31,7 +31,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/apps/{clientId}")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('SUPER_ADMIN')")
+@PreAuthorize("hasAnyRole('SUPER_ADMIN','TENANT_ADMIN')")
 public class AppAssignController {
 
     private final AppAssignService assignService;
