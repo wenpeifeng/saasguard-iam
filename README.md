@@ -215,7 +215,7 @@ saasguard-iam/
 
 ### 环境要求
 
-一键脚本会构建并启动服务，但不会替你安装开发工具。请先准备：
+一键脚本会在修改项目运行状态前完成环境体检。出于系统权限和安装来源安全考虑，脚本不会静默安装开发工具；缺少工具时会立即停止，并按当前操作系统输出安装命令或官方文档。Docker 已安装但没有运行时，脚本会自动启动 Docker Desktop/Engine 并等待服务就绪。
 
 | 工具 | 最低要求 | 用途 |
 |---|---|---|
@@ -231,9 +231,16 @@ macOS 可使用 Homebrew 安装主要依赖：
 
 ```bash
 brew install openjdk@21 maven node pnpm
+brew install --cask docker
 ```
 
-确保 Docker Desktop 已启动，然后在仓库根目录执行：
+其他系统的 Docker 安装入口：
+
+- Windows：`winget install -e --id Docker.DockerDesktop`，建议使用 WSL2；
+- Linux：按 [Docker Engine 官方安装文档](https://docs.docker.com/engine/install/) 安装 Engine 与 Compose v2 插件；
+- WSL2：安装 Windows Docker Desktop 并启用 WSL Integration。
+
+安装完成后无需预先手工启动 Docker，直接在仓库根目录执行：
 
 ```bash
 ./script/sh/start-all.sh
@@ -241,11 +248,13 @@ brew install openjdk@21 maven node pnpm
 
 脚本会依次执行：
 
-1. 检查 Docker、JDK 21、Maven、Node.js、pnpm 和 curl；
-2. 创建或启动 MySQL 8 与 Redis 7，并等待健康检查通过；
-3. 构建后端、执行 Flyway 迁移、后台启动 Spring Boot；
-4. 按锁文件安装前端依赖、后台启动 Vite；
-5. 等待前后端健康检查通过并输出访问地址。
+1. 一次性检查 curl、JDK 21、Maven 3.9+、Node.js 20+、pnpm 9+、Docker、Compose v2、已有构建产物和 8082/5174 端口；
+2. Docker 未运行时，按 macOS、Linux、Windows/WSL 环境尝试自动启动，并等待最多 120 秒；
+3. Docker 未安装或无法自动启动时，在启动任何项目组件前终止并输出对应安装/启动方法；
+4. 创建或启动 MySQL 8 与 Redis 7，并等待健康检查通过；
+5. 构建后端、执行 Flyway 迁移、后台启动 Spring Boot；
+6. 按锁文件安装前端依赖、后台启动 Vite；
+7. 等待前后端健康检查通过并输出访问地址。
 
 脚本支持重复执行：已由当前仓库启动的进程会被识别并跳过；如果端口被其他进程占用，脚本会明确报错，不会直接杀死其他项目。
 
@@ -257,6 +266,7 @@ brew install openjdk@21 maven node pnpm
 ./script/sh/start-all.sh --no-infra --backend-only  # 后端使用外部/已有 MySQL、Redis
 ./script/sh/start-all.sh --skip-build               # 使用已有后端 JAR
 ./script/sh/start-all.sh --skip-install             # 使用已有前端 node_modules
+./script/sh/start-all.sh --check-only               # 只做完整环境体检，不启动项目组件
 ./script/sh/start-all.sh --help                     # 查看全部选项
 ```
 

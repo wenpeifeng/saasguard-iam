@@ -35,6 +35,131 @@ require_command() {
     command -v "$1" >/dev/null 2>&1 || die "缺少命令 '$1'。$2"
 }
 
+version_at_least() {
+    local current="${1#v}"
+    local required_major="$2"
+    local required_minor="${3:-0}"
+    local current_major="${current%%.*}"
+    local remainder="${current#*.}"
+    local current_minor="${remainder%%.*}"
+
+    [[ "${current_major}" =~ ^[0-9]+$ && "${current_minor}" =~ ^[0-9]+$ ]] || return 1
+    (( current_major > required_major )) \
+        || (( current_major == required_major && current_minor >= required_minor ))
+}
+
+require_maven_39() {
+    require_command mvn "请安装 Maven 3.9 或更高版本。"
+    local version
+    version="$(mvn -version 2>/dev/null | awk 'NR == 1 { print $3 }')"
+    version_at_least "${version}" 3 9 \
+        || die "需要 Maven 3.9 或更高版本，当前版本为 ${version:-未知}。"
+}
+
+require_pnpm_9() {
+    require_command pnpm "请执行 'corepack enable'，或通过 npm install -g pnpm 安装 pnpm 9+。"
+    local version
+    version="$(pnpm --version 2>/dev/null)"
+    version_at_least "${version}" 9 0 \
+        || die "需要 pnpm 9 或更高版本，当前版本为 ${version:-未知}。"
+}
+
+docker_install_help() {
+    case "$(uname -s 2>/dev/null || true)" in
+        Darwin)
+            printf '%s\n' \
+                "  macOS：brew install --cask docker" \
+                "  或访问：https://docs.docker.com/desktop/setup/install/mac-install/"
+            ;;
+        Linux)
+            if [[ -n "${WSL_DISTRO_NAME:-}" ]]; then
+                printf '%s\n' \
+                    "  WSL2：请在 Windows 安装 Docker Desktop 并启用 WSL Integration" \
+                    "  文档：https://docs.docker.com/desktop/features/wsl/"
+            else
+                printf '%s\n' \
+                    "  Linux：请安装 Docker Engine 与 Compose 插件" \
+                    "  文档：https://docs.docker.com/engine/install/"
+            fi
+            ;;
+        MINGW*|MSYS*|CYGWIN*)
+            printf '%s\n' \
+                "  Windows：winget install -e --id Docker.DockerDesktop" \
+                "  或访问：https://docs.docker.com/desktop/setup/install/windows-install/"
+            ;;
+        *)
+            printf '%s\n' "  安装文档：https://docs.docker.com/get-docker/"
+            ;;
+    esac
+}
+
+start_windows_docker_desktop() {
+    require_command powershell.exe "请手工启动 Docker Desktop 后重试。"
+    powershell.exe -NoProfile -NonInteractive -Command \
+        '$dockerDesktop = Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"; if (!(Test-Path $dockerDesktop)) { exit 1 }; Start-Process $dockerDesktop' \
+        >/dev/null 2>&1 \
+        || die "无法自动启动 Docker Desktop，请确认已安装后手工启动。"
+}
+
+start_docker_engine() {
+    local platform
+    platform="$(uname -s 2>/dev/null || true)"
+
+    case "${platform}" in
+        Darwin)
+            require_command open "无法自动打开 Docker Desktop，请手工启动后重试。"
+            open -gja Docker >/dev/null 2>&1 \
+                || die "未找到 Docker Desktop。请先安装：brew install --cask docker"
+            ;;
+        Linux)
+            if [[ -n "${WSL_DISTRO_NAME:-}" ]] && command -v powershell.exe >/dev/null 2>&1; then
+                start_windows_docker_desktop
+            elif command -v systemctl >/dev/null 2>&1; then
+                if systemctl --user start docker-desktop >/dev/null 2>&1; then
+                    :
+                elif [[ "${EUID}" -eq 0 ]] && systemctl start docker >/dev/null 2>&1; then
+                    :
+                elif command -v sudo >/dev/null 2>&1 && sudo -n systemctl start docker >/dev/null 2>&1; then
+                    :
+                else
+                    die "Docker 已安装但服务未运行，自动启动需要管理员权限。请执行：sudo systemctl start docker"
+                fi
+            else
+                die "Docker 已安装但服务未运行，当前环境无法自动启动，请手工启动 Docker 后重试。"
+            fi
+            ;;
+        MINGW*|MSYS*|CYGWIN*)
+            start_windows_docker_desktop
+            ;;
+        *)
+            die "Docker 已安装但服务未运行，当前系统无法自动识别启动方式，请手工启动后重试。"
+            ;;
+    esac
+}
+
+ensure_docker_ready() {
+    if ! command -v docker >/dev/null 2>&1; then
+        warn "未检测到 Docker，无法启动 MySQL 与 Redis。"
+        docker_install_help >&2
+        exit 1
+    fi
+
+    if ! docker info >/dev/null 2>&1; then
+        info "Docker 已安装但服务未运行，正在尝试自动启动"
+        start_docker_engine
+        local i
+        for ((i = 1; i <= 60; i++)); do
+            docker info >/dev/null 2>&1 && break
+            [[ "${i}" -eq 60 ]] \
+                && die "Docker 120 秒内未就绪，请检查 Docker Desktop/Engine 状态后重试。"
+            sleep 2
+        done
+    fi
+
+    docker compose version >/dev/null 2>&1 \
+        || die "Docker Compose v2 不可用。请安装 Compose 插件：https://docs.docker.com/compose/install/"
+}
+
 java_major_version() {
     "$1" -version 2>&1 | awk -F '"' '/version/ { split($2, version, "."); print version[1]; exit }'
 }

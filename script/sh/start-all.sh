@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # SaaSGuard IAM 一键启动：基础设施 -> 后端 -> 前端。
-# 用法：./script/sh/start-all.sh [--backend-only|--web-only] [--no-infra] [--skip-build] [--skip-install]
+# 用法：./script/sh/start-all.sh [--backend-only|--web-only] [--no-infra] [--skip-build] [--skip-install] [--check-only]
 
 set -euo pipefail
 
@@ -13,6 +13,7 @@ MODE="all"
 START_INFRA=true
 SKIP_BUILD=false
 SKIP_INSTALL=false
+CHECK_ONLY=false
 
 usage() {
     cat <<'EOF'
@@ -27,6 +28,7 @@ SaaSGuard IAM 一键启动
   --no-infra      不启动 MySQL、Redis（使用已配置的外部基础设施）
   --skip-build    跳过 Maven 后端构建（需要已有 JAR）
   --skip-install  跳过 pnpm install（需要已有 node_modules）
+  --check-only    仅完成前置环境检查（Docker 未运行时仍会尝试启动）
   -h, --help      显示帮助
 EOF
 }
@@ -38,6 +40,7 @@ while [[ $# -gt 0 ]]; do
         --no-infra) START_INFRA=false ;;
         --skip-build) SKIP_BUILD=true ;;
         --skip-install) SKIP_INSTALL=true ;;
+        --check-only) CHECK_ONLY=true ;;
         -h|--help) usage; exit 0 ;;
         *) usage; die "未知选项：$1" ;;
     esac
@@ -45,13 +48,63 @@ while [[ $# -gt 0 ]]; do
 done
 
 cd "${PROJECT_ROOT}"
-require_command curl "请安装 curl。"
+
+preflight_environment() {
+    info "执行启动前置环境检查"
+    require_command curl "请安装 curl（健康检查需要）。"
+
+    if [[ "${MODE}" != "web" ]]; then
+        configure_java_21
+        if [[ "${SKIP_BUILD}" == false ]]; then
+            require_maven_39
+        elif ! find auth-backend/auth-bootstrap/target -maxdepth 1 -type f \
+            -name 'saasguard-iam-server-*.jar' ! -name '*.original' -print -quit 2>/dev/null | grep -q .; then
+            die "--skip-build 需要已有后端 JAR，请去掉该选项后重试。"
+        fi
+
+        remove_stale_pid "${BACKEND_PID_FILE}" "saasguard-iam-server"
+        if ! managed_process_running "${BACKEND_PID_FILE}" "saasguard-iam-server" && port_is_open 8082; then
+            die "端口 8082 已被其他进程占用。请释放端口后重试；脚本不会终止非本项目进程。"
+        fi
+    fi
+
+    if [[ "${MODE}" != "backend" ]]; then
+        require_node_20
+        if [[ "${SKIP_INSTALL}" == false ]]; then
+            require_pnpm_9
+        elif [[ ! -f auth-web/node_modules/vite/bin/vite.js ]]; then
+            die "--skip-install 需要已有前端 node_modules，请去掉该选项后重试。"
+        fi
+
+        remove_stale_pid "${FRONTEND_PID_FILE}" "vite/bin/vite.js"
+        if ! managed_process_running "${FRONTEND_PID_FILE}" "vite/bin/vite.js" && port_is_open 5174; then
+            die "端口 5174 已被其他进程占用。请释放端口后重试；脚本不会终止非本项目进程。"
+        fi
+    fi
+
+    if [[ "${MODE}" != "web" && "${START_INFRA}" == true ]]; then
+        ensure_docker_ready
+    else
+        info "当前选项不启动基础设施，跳过 Docker 检查"
+    fi
+
+    success "前置环境检查通过"
+    if [[ "${MODE}" != "web" ]]; then
+        local backend_summary="Java $(java_major_version "${JAVA_HOME}/bin/java")"
+        [[ "${SKIP_BUILD}" == true ]] || backend_summary="${backend_summary} / Maven $(mvn -version | awk 'NR == 1 { print $3 }')"
+        info "后端环境：${backend_summary}"
+    fi
+    if [[ "${MODE}" != "backend" ]]; then
+        local frontend_summary="Node $(node --version)"
+        [[ "${SKIP_INSTALL}" == true ]] || frontend_summary="${frontend_summary} / pnpm $(pnpm --version)"
+        info "前端环境：${frontend_summary}"
+    fi
+    if [[ "${MODE}" != "web" && "${START_INFRA}" == true ]]; then
+        info "容器环境：Docker $(docker version --format '{{.Server.Version}}') / Compose $(docker compose version --short)"
+    fi
+}
 
 start_infrastructure() {
-    require_command docker "请安装 Docker Desktop 或 Docker Engine，并确保支持 docker compose。"
-    docker info >/dev/null 2>&1 || die "Docker 服务未运行，请先启动 Docker。"
-    docker compose version >/dev/null 2>&1 || die "当前 Docker 未安装 Compose v2 插件。"
-
     info "启动 MySQL 8 与 Redis 7（重复执行是安全的）"
     if docker inspect auth-mysql >/dev/null 2>&1; then
         info "复用已存在的 auth-mysql 容器"
@@ -87,8 +140,6 @@ start_infrastructure() {
 }
 
 start_backend() {
-    configure_java_21
-    require_command mvn "请安装 Maven 3.9 或更高版本。"
     remove_stale_pid "${BACKEND_PID_FILE}" "saasguard-iam-server"
 
     if managed_process_running "${BACKEND_PID_FILE}" "saasguard-iam-server"; then
@@ -123,8 +174,6 @@ start_backend() {
 }
 
 start_frontend() {
-    require_node_20
-    require_command pnpm "请执行 'corepack enable'，或通过 npm install -g pnpm 安装 pnpm。"
     remove_stale_pid "${FRONTEND_PID_FILE}" "vite/bin/vite.js"
 
     if managed_process_running "${FRONTEND_PID_FILE}" "vite/bin/vite.js"; then
@@ -156,6 +205,12 @@ start_frontend() {
     fi
     success "前端已就绪：http://localhost:5174"
 }
+
+preflight_environment
+if [[ "${CHECK_ONLY}" == true ]]; then
+    success "仅检查模式完成，未启动项目容器或应用进程"
+    exit 0
+fi
 
 if [[ "${MODE}" != "web" && "${START_INFRA}" == true ]]; then
     start_infrastructure
