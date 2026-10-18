@@ -1,5 +1,8 @@
 # SaaSGuard IAM
 
+[![CI](https://github.com/wenpeifeng/saasguard-iam/actions/workflows/ci.yml/badge.svg)](https://github.com/wenpeifeng/saasguard-iam/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 > 面向 SaaS 产品和企业应用的可扩展、多租户身份与访问管理平台。
 
 SaaSGuard IAM 把“人员主档、组织、应用入口、应用角色和审计”统一收口，为 ERP、MES、WMS、门户等系统提供统一登录与实时身份同步。项目采用 Java 21 + Spring Boot 3.3 与 React 18，内置可重复执行的 Flyway 初始化数据，首次启动即可体验两个彼此隔离的租户。
