@@ -69,6 +69,21 @@ class IdentityChainIntegrationTest {
     void loginAdmin() throws Exception { admin = login("admin", "123456"); }
 
     @Test
+    void completeShowcaseSeedPopulatesEveryCoreManagementList() throws Exception {
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM iam_tenant WHERE deleted=0", Integer.class))
+                .isGreaterThanOrEqualTo(4);
+
+        assertShowcaseTenant("demo", 13, 20, 6, 30, 6, 5);
+        assertShowcaseTenant("acme-demo", 7, 8, 4, 12, 4, 3);
+        assertShowcaseTenant("northstar-demo", 7, 7, 3, 10, 4, 2);
+
+        assertThat(jdbc.queryForObject(
+                "SELECT status FROM iam_tenant WHERE code='legacy-demo' AND deleted=0", Integer.class))
+                .isZero();
+        assertThat(login("northstar-demo", "northstar_admin", "123456")).isNotBlank();
+    }
+
+    @Test
     void organizationTypesCodesAndHierarchy() throws Exception {
         long factory = org("FACTORY", 1);
         long department = org("DEPARTMENT", factory);
@@ -194,7 +209,9 @@ class IdentityChainIntegrationTest {
 
         JsonNode acmeUsers = ok(call("GET", "/idm/users?pageNum=1&pageSize=20", null, acme));
         assertThat(acmeUsers.path("records").findValuesAsText("username"))
-                .containsExactly("acme_admin");
+                .contains("acme_admin", "acme_zhang", "acme_li", "acme_wang", "acme_zhao", "acme_chen")
+                .doesNotContain("admin", "E3001");
+        assertThat(acmeUsers.path("total").asLong()).isGreaterThanOrEqualTo(8);
         fail(call("GET", "/tenants?pageNum=1&pageSize=20", null, acme));
 
         JsonNode demoUsers = ok(call("GET", "/idm/users?pageNum=1&pageSize=50", null, admin));
@@ -203,7 +220,8 @@ class IdentityChainIntegrationTest {
 
         JsonNode switched = ok(callAsTenant("GET", "/idm/users?pageNum=1&pageSize=20", null, admin, 2000L));
         assertThat(switched.path("records").findValuesAsText("username"))
-                .containsExactly("acme_admin");
+                .contains("acme_admin", "acme_zhang", "acme_li")
+                .doesNotContain("admin", "E3001");
 
         ok(call("PUT", "/tenants/2000/status/0", null, admin));
         try {
@@ -264,6 +282,24 @@ class IdentityChainIntegrationTest {
 
     long org(String type, long parent) throws Exception {
         return ok(call("POST", "/idm/orgs", Map.of("name", type + "验证", "orgType", type, "parentId", parent), admin)).asLong();
+    }
+    void assertShowcaseTenant(String tenantCode, int orgs, int users, int apps, int assignments,
+                              int loginLogs, int operationLogs) {
+        Long tenantId = jdbc.queryForObject(
+                "SELECT id FROM iam_tenant WHERE code=? AND deleted=0", Long.class, tenantCode);
+        assertThat(tenantId).isNotNull();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM idm_org WHERE tenant_id=? AND deleted=0", Integer.class, tenantId))
+                .isGreaterThanOrEqualTo(orgs);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM idm_user WHERE tenant_id=? AND deleted=0", Integer.class, tenantId))
+                .isGreaterThanOrEqualTo(users);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM app_client WHERE tenant_id=? AND deleted=0", Integer.class, tenantId))
+                .isGreaterThanOrEqualTo(apps);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM app_user_assign WHERE tenant_id=? AND deleted=0", Integer.class, tenantId))
+                .isGreaterThanOrEqualTo(assignments);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM audit_login_log WHERE tenant_id=?", Integer.class, tenantId))
+                .isGreaterThanOrEqualTo(loginLogs);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM audit_op_log WHERE tenant_id=?", Integer.class, tenantId))
+                .isGreaterThanOrEqualTo(operationLogs);
     }
     String login(String username, String password) throws Exception {
         return login("demo", username, password);
